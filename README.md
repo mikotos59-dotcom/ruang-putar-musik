@@ -24,6 +24,12 @@ tanpa iklan dan tanpa akun. Dibuat oleh **@SuS_X_x**.
 2. Buka file tersebut di HP → izinkan "Instal aplikasi tidak dikenal" bila diminta → **Instal**.
 3. Versi berikutnya cukup lewat **Pengaturan → Pembaruan → Perbarui** di aplikasi.
 
+## Masukan & lapor bug
+Gabung server Discord **Bengkel SuS**: https://discord.gg/VRqw9EGUpb
+- 💡 Ide fitur → `#masukan`
+- 🐞 Lapor bug → `#lapor-bug` (sertakan versi dari **Pengaturan → Pembaruan** + screenshot)
+- 📢 Info update → `#pengumuman`
+
 ## Catatan
 Untuk pemakaian pribadi. Aplikasi ini tidak berafiliasi dengan YouTube atau Google.
 

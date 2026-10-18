@@ -67,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -550,6 +551,18 @@ fun LayarPengaturan(vm: AppVM) {
         Bagian("Tentang")
         Text("Ruang Putar Musik v${BuildConfig.VERSION_NAME}", fontWeight = FontWeight.SemiBold)
         Text("Dibuat oleh @SuS_X_x", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val uri = LocalUriHandler.current
+        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { runCatching { uri.openUri(TAUTAN_DISCORD) } }) { Text("Gabung Discord") }
+            OutlinedButton(onClick = { runCatching { uri.openUri("https://github.com/${BuildConfig.REPO_GITHUB}") } }) {
+                Text("GitHub")
+            }
+        }
+        Text(
+            "Kirim masukan & lapor bug di server Discord Bengkel SuS (sertakan versi di atas + screenshot).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
         Text(
             "Untuk pemakaian pribadi. Mesin pengambil lagu: NewPipeExtractor (GPL-3.0).",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -605,3 +618,6 @@ private fun labelDurasi(minDetik: Int, maksMenit: Int): String {
         else -> ""
     }
 }
+
+/** Server Discord "Bengkel SuS": masukan, lapor bug, pengumuman. */
+const val TAUTAN_DISCORD = "https://discord.gg/VRqw9EGUpb"
