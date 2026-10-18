@@ -53,13 +53,17 @@ data class Rak(
     val kueri: String,
     val maksMenit: Int = 5,
     val channel: String = "",   // diisi = rak lagu dari channel penyanyi ini (kueri = nama penyanyi)
+    val minDetik: Int = -1,     // durasi minimal; -1 = ikut Pengaturan, 0 = tanpa batas
 ) {
+    /** Durasi minimal yang berlaku untuk rak ini (detik). */
+    fun minBerlaku(p: Pengaturan) = if (minDetik < 0) p.minDetik else minDetik
+
     fun keJson(): JSONObject = JSONObject().put("id", id).put("nama", nama).put("kueri", kueri)
-        .put("maks", maksMenit).put("channel", channel)
+        .put("maks", maksMenit).put("channel", channel).put("min", minDetik)
 
     companion object {
         fun dariJson(o: JSONObject) = Rak(
-            o.optString("id"), o.optString("nama"), o.optString("kueri"), o.optInt("maks", 5), o.optString("channel"),
+            o.optString("id"), o.optString("nama"), o.optString("kueri"), o.optInt("maks", 5), o.optString("channel"), o.optInt("min", -1),
         )
     }
 }
@@ -78,9 +82,10 @@ data class Pengaturan(
     val kecepatan: String = "normal",    // rendah | normal | tanpa
     val cacheMb: Int = 512,
     val filterCari: String = "lagu",     // lagu (YouTube Music) | video (semua video)
+    val minDetik: Int = 60,              // sembunyikan lagu lebih pendek dari ini (0 = tampilkan semua)
 ) {
     fun keJson(): JSONObject = JSONObject().put("tema", tema).put("kualitas", kualitas)
-        .put("kecepatan", kecepatan).put("cacheMb", cacheMb).put("filterCari", filterCari)
+        .put("kecepatan", kecepatan).put("cacheMb", cacheMb).put("filterCari", filterCari).put("minDetik", minDetik)
 
     val batasByte: Long
         get() = when (kecepatan) {
@@ -96,6 +101,7 @@ data class Pengaturan(
             kecepatan = o.optString("kecepatan", "normal"),
             cacheMb = o.optInt("cacheMb", 512),
             filterCari = o.optString("filterCari", "lagu"),
+            minDetik = o.optInt("minDetik", 60),
         )
     }
 }

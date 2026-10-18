@@ -337,7 +337,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var hasilCari: Halaman? by mutableStateOf(null)
         private set
 
-    fun cari(teks: String, maksMenit: Int = 0, judul: String = "") {
+    /** minDetik: -1 = ikut Pengaturan (durasi minimal). */
+    fun cari(teks: String, maksMenit: Int = 0, judul: String = "", minDetik: Int = -1) {
         val t = teks.trim()
         if (t.isEmpty()) return
         val id = if (t.startsWith("http")) YouTube.idDari(t) else null
@@ -345,13 +346,25 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         kueri = t
         judulCari = judul.ifEmpty { "Hasil: $t" }
         val filter = data.pengaturan.value.filterCari
-        hasilCari = Halaman(this) { p -> YouTube.cari(t, p, filter, maksMenit * 60) }.also { it.mulai() }
+        val min = if (minDetik < 0) data.pengaturan.value.minDetik else minDetik
+        cariTerakhir = Triple(maksMenit, judul, minDetik)
+        hasilCari = Halaman(this) { p -> YouTube.cari(t, p, filter, maksMenit * 60, min) }.also { it.mulai() }
         tab = Tab.CARI
     }
+
+    private var cariTerakhir = Triple(0, "", -1)
 
     fun ubahFilterCari(filter: String) {
         data.ubahPengaturan { it.copy(filterCari = filter) }
         if (kueri.isNotEmpty()) cari(kueri)
+    }
+
+    /** Durasi minimal (Pengaturan) diubah: muat ulang pencarian & rak yang ikut pengaturan. */
+    fun ubahMinDurasi(detik: Int) {
+        data.ubahPengaturan { it.copy(minDetik = detik) }
+        val (maks, judul, min) = cariTerakhir
+        if (kueri.isNotEmpty() && hasilCari != null && min < 0) cari(kueri, maks, judul)
+        data.rak.value.filter { it.minDetik < 0 }.forEach { muatRak(it, paksa = true) }
     }
 
     private var tautanTertunda: String? = null
@@ -413,7 +426,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun lihatSemuaRak(rak: Rak) {
-        if (rak.channel.isNotEmpty()) bukaPenyanyi(rak.kueri, rak.channel) else cari(rak.kueri, rak.maksMenit, rak.nama)
+        if (rak.channel.isNotEmpty()) bukaPenyanyi(rak.kueri, rak.channel) else cari(rak.kueri, rak.maksMenit, rak.nama, rak.minDetik)
     }
 
     /** Tombol "+ Rak" di halaman penyanyi: rak Beranda berisi lagu dari channel ini (maks 10 menit, tanpa kompilasi). */

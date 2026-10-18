@@ -84,9 +84,9 @@ object YouTube {
     // ------------------------------------------------------------------ pencarian
     /**
      * filter "lagu" = YouTube Music (lagu satuan, tanpa kompilasi); "video" = semua video.
-     * maksDetik > 0: hanya yang durasinya <= itu.
+     * maksDetik > 0: hanya yang durasinya <= itu. minDetik > 0: buang yang lebih pendek dari itu.
      */
-    suspend fun cari(kueri: String, halaman: Page? = null, filter: String = "lagu", maksDetik: Int = 0): Hasil = jalankan {
+    suspend fun cari(kueri: String, halaman: Page? = null, filter: String = "lagu", maksDetik: Int = 0, minDetik: Int = 0): Hasil = jalankan {
         val jenis = if (filter == "video") YoutubeSearchQueryHandlerFactory.VIDEOS else YoutubeSearchQueryHandlerFactory.MUSIC_SONGS
         val qh = layanan.searchQHFactory.fromQuery(kueri, listOf(jenis), "")
         val (item, berikut) = if (halaman == null) {
@@ -96,13 +96,14 @@ object YouTube {
             val p = SearchInfo.getMoreItems(layanan, qh, halaman)
             p.items to p.nextPage
         }
-        Hasil(keLagu(item, maksDetik), berikut?.takeIf { Page.isValid(it) })
+        Hasil(keLagu(item, maksDetik, minDetik), berikut?.takeIf { Page.isValid(it) })
     }
 
-    private fun keLagu(item: List<InfoItem>, maksDetik: Int): List<Lagu> = item
+    private fun keLagu(item: List<InfoItem>, maksDetik: Int, minDetik: Int = 0): List<Lagu> = item
         .filterIsInstance<StreamInfoItem>()
         .filter { it.streamType != StreamType.LIVE_STREAM && it.streamType != StreamType.AUDIO_LIVE_STREAM }
         .filter { maksDetik <= 0 || (it.duration in 1..maksDetik.toLong()) }
+        .filter { minDetik <= 0 || it.duration <= 0 || it.duration >= minDetik }
         .mapNotNull { s ->
             val id = idDari(s.url) ?: return@mapNotNull null
             Lagu(
@@ -264,15 +265,19 @@ object YouTube {
     private val simpananRak = ConcurrentHashMap<String, Pair<Long, List<Lagu>>>()
 
     suspend fun isiRak(rak: Rak, paksa: Boolean = false): List<Lagu> {
-        val k = "${rak.kueri}|${rak.maksMenit}|${rak.channel}"
+        val min = rak.minBerlaku(App.data.pengaturan.value)
+        val k = "${rak.kueri}|${rak.maksMenit}|${rak.channel}|$min"
         val c = simpananRak[k]
         if (!paksa && c != null && System.currentTimeMillis() - c.first < 12 * 3600_000L) return c.second
         if (sedangDitahan) return c?.second ?: throw DitahanYouTube()
         val hasil = if (rak.channel.isNotEmpty()) {
             val maks = rak.maksMenit * 60L
-            laguChannel(rak.channel, rak.kueri).lagu.filter { maks <= 0 || it.durasi in 1..maks }.take(20)
+            laguChannel(rak.channel, rak.kueri).lagu
+                .filter { maks <= 0 || it.durasi in 1..maks }
+                .filter { min <= 0 || it.durasi <= 0 || it.durasi >= min }
+                .take(20)
         } else {
-            cari(rak.kueri, null, "lagu", rak.maksMenit * 60).lagu.take(20)
+            cari(rak.kueri, null, "lagu", rak.maksMenit * 60, min).lagu.take(20)
         }
         simpananRak[k] = System.currentTimeMillis() to hasil
         return hasil

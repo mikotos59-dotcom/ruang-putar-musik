@@ -120,14 +120,14 @@ fun LayarBeranda(vm: AppVM) {
     }
 
     if (tambahRak) {
-        DialogRak(null, onBatal = { tambahRak = false }) { nama, kueri, maks ->
-            vm.data.tambahRak(nama, kueri, maks)
+        DialogRak(null, onBatal = { tambahRak = false }) { nama, kueri, maks, min ->
+            vm.data.tambahRak(nama, kueri, maks, minDetik = min)
             tambahRak = false
         }
     }
     dialogRak?.let { r ->
-        DialogRak(r, onBatal = { dialogRak = null }) { nama, kueri, maks ->
-            val baru = r.copy(nama = nama, kueri = kueri, maksMenit = maks)
+        DialogRak(r, onBatal = { dialogRak = null }) { nama, kueri, maks, min ->
+            val baru = r.copy(nama = nama, kueri = kueri, maksMenit = maks, minDetik = min)
             vm.data.ubahRak(baru)
             vm.muatRak(baru, paksa = true)
             dialogRak = null
@@ -199,9 +199,11 @@ private fun RakBeranda(r: Rak, vm: AppVM, onUbah: () -> Unit) {
     val isi = vm.isiRak[r.id]
     val pesan = vm.pesanRak[r.id]
     var menu by remember { mutableStateOf(false) }
+    val pengaturan by vm.data.pengaturan.collectAsState()
     JudulRak(r.nama + "  ›", { vm.lihatSemuaRak(r) }) {
-        if (r.maksMenit > 0) {
-            Text("≤ ${r.maksMenit} mnt", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val label = labelDurasi(r.minBerlaku(pengaturan), r.maksMenit)
+        if (label.isNotEmpty()) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         IconButton(onClick = { vm.muatRak(r, paksa = true) }) { Icon(Icons.Filled.Refresh, "Muat ulang") }
         Box {
@@ -227,10 +229,11 @@ private fun RakBeranda(r: Rak, vm: AppVM, onUbah: () -> Unit) {
 }
 
 @Composable
-private fun DialogRak(lama: Rak?, onBatal: () -> Unit, onSimpan: (String, String, Int) -> Unit) {
+private fun DialogRak(lama: Rak?, onBatal: () -> Unit, onSimpan: (String, String, Int, Int) -> Unit) {
     var nama by remember { mutableStateOf(lama?.nama ?: "") }
     var kueri by remember { mutableStateOf(lama?.kueri ?: "") }
     var maks by remember { mutableIntStateOf(lama?.maksMenit ?: 5) }
+    var min by remember { mutableIntStateOf(lama?.minDetik ?: -1) }
     AlertDialog(
         onDismissRequest = onBatal,
         title = { Text(if (lama == null) "Tambah rak" else "Ubah rak") },
@@ -240,7 +243,11 @@ private fun DialogRak(lama: Rak?, onBatal: () -> Unit, onSimpan: (String, String
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(kueri, { kueri = it }, label = { Text("Kata kunci pencarian") }, singleLine = true)
                 Spacer(Modifier.height(12.dp))
-                Text("Durasi", style = MaterialTheme.typography.labelLarge)
+                Text("Durasi minimal", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PILIHAN_MIN_RAK.forEach { (d, t) -> Pilihan(t, min == d) { min = d } }
+                }
+                Text("Durasi maksimal", style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(0 to "Semua", 5 to "< 5 mnt", 10 to "< 10 mnt", 20 to "< 20 mnt", 60 to "< 1 jam").forEach { (m, t) ->
                         Pilihan(t, maks == m) { maks = m }
@@ -254,7 +261,7 @@ private fun DialogRak(lama: Rak?, onBatal: () -> Unit, onSimpan: (String, String
             }
         },
         confirmButton = {
-            TextButton(enabled = kueri.isNotBlank(), onClick = { onSimpan(nama.ifBlank { kueri.take(30) }, kueri.trim(), maks) }) {
+            TextButton(enabled = kueri.isNotBlank(), onClick = { onSimpan(nama.ifBlank { kueri.take(30) }, kueri.trim(), maks, min) }) {
                 Text("Simpan")
             }
         },
@@ -291,6 +298,14 @@ fun LayarCari(vm: AppVM) {
         Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Pilihan("Lagu", pengaturan.filterCari == "lagu") { vm.ubahFilterCari("lagu") }
             Pilihan("Semua video", pengaturan.filterCari == "video") { vm.ubahFilterCari("video") }
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Min.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PILIHAN_MIN.forEach { (d, t) -> Pilihan(t, pengaturan.minDetik == d) { vm.ubahMinDurasi(d) } }
         }
         if (h == null) {
             Kosong("Ketik judul lagu atau nama penyanyi, lalu tekan cari. Bisa juga tempel link YouTube.")
@@ -495,6 +510,12 @@ fun LayarPengaturan(vm: AppVM) {
             vm.data.ubahPengaturan { it.copy(tema = v) }
         }
 
+        Bagian("Pencarian & Beranda")
+        BarisPilihan(
+            "Durasi minimal lagu", PILIHAN_MIN.map { (d, t) -> d.toString() to t }, p.minDetik.toString(),
+            "Lagu yang lebih pendek disembunyikan dari hasil cari & rak (mis. potongan / klip pendek). Tiap rak bisa diatur sendiri.",
+        ) { v -> vm.ubahMinDurasi(v.toInt()) }
+
         Bagian("Pemutaran")
         BarisPilihan("Kualitas suara", listOf("tinggi" to "Tinggi", "hemat" to "Hemat kuota"), p.kualitas,
             "Hemat kuota: ± 50–70 kbps, cukup jernih untuk HP & headset.") { v ->
@@ -564,3 +585,23 @@ fun Bulat(isi: @Composable () -> Unit) {
         contentAlignment = Alignment.Center) { isi() }
 }
 
+
+// ---------------------------------------------------------------------- durasi minimal
+private val PILIHAN_MIN = listOf(0 to "Semua", 30 to "30 dtk", 60 to "1 mnt", 90 to "1,5 mnt", 120 to "2 mnt")
+private val PILIHAN_MIN_RAK = listOf(-1 to "Ikut pengaturan") + PILIHAN_MIN
+
+/** "1–5 mnt", "≥ 1 mnt", "≤ 5 mnt", atau kosong. */
+private fun labelDurasi(minDetik: Int, maksMenit: Int): String {
+    val min = when {
+        minDetik <= 0 -> ""
+        minDetik % 60 == 0 -> "${minDetik / 60}"
+        minDetik < 60 -> "${minDetik} dtk"
+        else -> "%.1f".format(minDetik / 60.0).replace('.', ',')
+    }
+    return when {
+        min.isNotEmpty() && maksMenit > 0 -> "$min–$maksMenit mnt"
+        min.isNotEmpty() -> if (min.endsWith("dtk")) "≥ $min" else "≥ $min mnt"
+        maksMenit > 0 -> "≤ $maksMenit mnt"
+        else -> ""
+    }
+}

@@ -123,8 +123,8 @@ class Penyimpanan(private val file: File, private val scope: CoroutineScope) {
     }
 
     // ------------------------------------------------------------ rak
-    fun tambahRak(nama: String, kueri: String, maksMenit: Int, channel: String = "") {
-        _rak.value = _rak.value + Rak("r${System.currentTimeMillis()}", nama, kueri, maksMenit, channel)
+    fun tambahRak(nama: String, kueri: String, maksMenit: Int, channel: String = "", minDetik: Int = -1) {
+        _rak.value = _rak.value + Rak("r${System.currentTimeMillis()}", nama, kueri, maksMenit, channel, minDetik)
         simpanNanti()
     }
 
