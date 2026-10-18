@@ -1,0 +1,120 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  # Tiap Senin 03.00 WIB: cek versi baru mesin YouTube (NewPipeExtractor).
+  # Ada versi baru -> build & terbitkan Release. Tidak ada -> berhenti (tidak memakai jatah build).
+  schedule:
+    - cron: "0 20 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cek versi mesin YouTube (NewPipeExtractor)
+        id: cek
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          kini=$(grep -oP '^npeVersi=\K.*' gradle.properties)
+          terbaru=$(gh api repos/TeamNewPipe/NewPipeExtractor/releases/latest --jq .tag_name || echo "")
+          echo "Versi sekarang: $kini | terbaru: ${terbaru:-?}"
+          if [ -n "$terbaru" ] && [ "$terbaru" != "$kini" ]; then
+            sed -i "s/^npeVersi=.*/npeVersi=$terbaru/" gradle.properties
+            echo "baru=$terbaru" >> "$GITHUB_OUTPUT"
+            echo "lanjut=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "Mesin YouTube sudah versi terbaru - tidak perlu build."
+            echo "lanjut=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "lanjut=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Siapkan kunci tanda tangan
+        if: steps.cek.outputs.lanjut == 'true'
+        env:
+          KUNCI_BASE64: ${{ secrets.KUNCI_BASE64 }}
+        run: |
+          if [ -n "$KUNCI_BASE64" ]; then
+            echo "$KUNCI_BASE64" | base64 -d > "$RUNNER_TEMP/kunci.jks"
+            echo "KUNCI_FILE=$RUNNER_TEMP/kunci.jks" >> "$GITHUB_ENV"
+            echo "Kunci diambil dari GitHub Secrets."
+          elif [ -f kunci/ruangputar.jks ]; then
+            echo "Kunci diambil dari folder kunci/ (repo private)."
+          else
+            echo "::error::Kunci tidak ditemukan. Isi secret KUNCI_BASE64 (lihat README)."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.cek.outputs.lanjut == 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.cek.outputs.lanjut == 'true'
+
+      - name: Build APK rilis
+        if: steps.cek.outputs.lanjut == 'true'
+        env:
+          KUNCI_SANDI: ${{ secrets.KUNCI_SANDI }}
+          KUNCI_ALIAS: ${{ secrets.KUNCI_ALIAS }}
+        run: |
+          [ -z "$KUNCI_SANDI" ] && unset KUNCI_SANDI
+          [ -z "$KUNCI_ALIAS" ] && unset KUNCI_ALIAS
+          chmod +x gradlew
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Kumpulkan APK
+        id: apk
+        if: steps.cek.outputs.lanjut == 'true'
+        run: |
+          V=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          KODE=$(( ${{ github.run_number }} + 100 ))
+          mkdir -p hasil
+          cp app/build/outputs/apk/release/*.apk "hasil/RuangPutarMusik-v${V}-b${KODE}.apk"
+          echo "versi=$V" >> "$GITHUB_OUTPUT"
+          echo "kode=$KODE" >> "$GITHUB_OUTPUT"
+          ls -la hasil
+
+      - name: Simpan versi mesin YouTube yang baru ke repo
+        if: steps.cek.outputs.baru != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle.properties
+          git commit -m "Mesin YouTube diperbarui ke ${{ steps.cek.outputs.baru }} [skip ci]"
+          git push
+
+      - name: Terbitkan Release (dicek oleh aplikasi)
+        if: steps.cek.outputs.lanjut == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NPE=$(grep -oP '^npeVersi=\K.*' gradle.properties)
+          CATATAN="Mesin YouTube: NewPipeExtractor $NPE"
+          [ -n "${{ steps.cek.outputs.baru }}" ] && CATATAN="Pembaruan otomatis: mesin YouTube diperbarui ke $NPE"
+          [ "${{ github.event_name }}" = "push" ] && CATATAN="$(git log -1 --pretty=%s) | $CATATAN"
+          gh release create "b${{ steps.apk.outputs.kode }}" hasil/*.apk \
+            --title "Ruang Putar Musik v${{ steps.apk.outputs.versi }} (build ${{ steps.apk.outputs.kode }})" \
+            --notes "$CATATAN" --latest
+          # simpan 5 rilis terakhir saja
+          gh release list --limit 100 --json tagName --jq '.[5:][].tagName' | while read t; do
+            gh release delete "$t" --yes --cleanup-tag || true
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: steps.cek.outputs.lanjut == 'true'
+        with:
+          name: RuangPutarMusik-apk
+          path: hasil/*.apk
+          if-no-files-found: error
