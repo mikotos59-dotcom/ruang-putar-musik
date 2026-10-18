@@ -104,7 +104,16 @@ jobs:
           CATATAN="Mesin YouTube: NewPipeExtractor $NPE"
           [ -n "${{ steps.cek.outputs.baru }}" ] && CATATAN="Pembaruan otomatis: mesin YouTube diperbarui ke $NPE"
           [ "${{ github.event_name }}" = "push" ] && CATATAN="$(git log -1 --pretty=%s) | $CATATAN"
-          gh release create "b${{ steps.apk.outputs.kode }}" hasil/*.apk \
+          # versi.json: dibaca aplikasi lewat .../releases/latest/download/versi.json
+          # (tanpa API GitHub, jadi tidak kena batas 60 cek/jam per jaringan)
+          mkdir -p rilis
+          APK=$(basename hasil/*.apk)
+          jq -n --argjson kode ${{ steps.apk.outputs.kode }} \
+            --arg nama "Ruang Putar Musik v${{ steps.apk.outputs.versi }} (build ${{ steps.apk.outputs.kode }})" \
+            --arg catatan "$CATATAN" --arg file "$APK" --argjson ukuran $(stat -c%s hasil/$APK) \
+            '{kode: $kode, nama: $nama, catatan: $catatan, file: $file, ukuran: $ukuran}' > rilis/versi.json
+          cat rilis/versi.json
+          gh release create "b${{ steps.apk.outputs.kode }}" hasil/*.apk rilis/versi.json \
             --title "Ruang Putar Musik v${{ steps.apk.outputs.versi }} (build ${{ steps.apk.outputs.kode }})" \
             --notes "$CATATAN" --latest
           # simpan 5 rilis terakhir saja
