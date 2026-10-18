@@ -103,19 +103,58 @@ object Pembaruan {
         }
     }
 
+    /**
+     * Rilis terbaru. Utama: file versi.json di Release (lewat github.com, tanpa API, tanpa batas).
+     * Cadangan: API GitHub (dibatasi 60 cek/jam per jaringan — operator seluler sering berbagi satu IP).
+     */
     private fun ambilRilisTerbaru(): Status.Tersedia? {
-        val req = okhttp3.Request.Builder()
-            .url("https://api.github.com/repos/${BuildConfig.REPO_GITHUB}/releases/latest")
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "RuangPutarMusik/${BuildConfig.VERSION_NAME}")
-            .build()
-        val teks = Jaringan.api.newCall(req).execute().use { r ->
+        val galatUtama = try {
+            return lewatVersiJson()
+        } catch (e: TidakAda) {
+            null
+        } catch (e: Exception) {
+            e
+        }
+        return try {
+            lewatApi()
+        } catch (e: Exception) {
+            throw galatUtama ?: e
+        }
+    }
+
+    private class TidakAda : Exception()
+
+    private fun minta(url: String, json: Boolean = false): String? {
+        val b = okhttp3.Request.Builder().url(url).header("User-Agent", "RuangPutarMusik/${BuildConfig.VERSION_NAME}")
+        if (json) b.header("Accept", "application/vnd.github+json")
+        return Jaringan.api.newCall(b.build()).execute().use { r ->
             when {
-                r.code == 404 -> return null          // belum ada Release / repo private
+                r.code == 404 -> null
+                r.code == 403 || r.code == 429 ->
+                    throw IllegalStateException("GitHub sedang membatasi pengecekan dari jaringan ini. Coba lagi nanti atau pakai Wi-Fi.")
                 !r.isSuccessful -> throw IllegalStateException("HTTP ${r.code}")
-                else -> r.body?.string() ?: return null
+                else -> r.body?.string()
             }
         }
+    }
+
+    private fun lewatVersiJson(): Status.Tersedia {
+        val repo = BuildConfig.REPO_GITHUB
+        val teks = minta("https://github.com/$repo/releases/latest/download/versi.json") ?: throw TidakAda()
+        val o = JSONObject(teks)
+        val kode = o.optInt("kode", -1).takeIf { it > 0 } ?: throw TidakAda()
+        val file = o.optString("file").ifEmpty { throw TidakAda() }
+        return Status.Tersedia(
+            nama = o.optString("nama").ifEmpty { "build $kode" },
+            kode = kode,
+            url = "https://github.com/$repo/releases/download/b$kode/$file",
+            catatan = o.optString("catatan"),
+            ukuran = o.optLong("ukuran"),
+        )
+    }
+
+    private fun lewatApi(): Status.Tersedia? {
+        val teks = minta("https://api.github.com/repos/${BuildConfig.REPO_GITHUB}/releases/latest", json = true) ?: return null
         val o = JSONObject(teks)
         val kode = o.optString("tag_name").removePrefix("b").toIntOrNull() ?: return null
         val aset = o.optJSONArray("assets") ?: return null
