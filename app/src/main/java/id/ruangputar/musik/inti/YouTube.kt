@@ -143,6 +143,21 @@ object YouTube {
         return s
     }
 
+    /**
+     * Semua pilihan stream untuk diunduh, urut dari yang paling cocok:
+     * M4A kualitas tertinggi dulu, lalu format lain. Selalu alamat baru (tidak dari simpanan),
+     * supaya kalau satu ditolak YouTube (HTTP 403) masih ada cadangan.
+     */
+    suspend fun suaraUnduh(id: String): List<Suara> = jalankan {
+        val info = StreamInfo.getInfo(layanan, "https://www.youtube.com/watch?v=$id")
+        val calon = info.audioStreams.filter { it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+        val utama = calon.filter { it.audioTrackType == null || it.audioTrackType == AudioTrackType.ORIGINAL }.ifEmpty { calon }
+        if (utama.isEmpty()) throw IllegalStateException("Tidak ada stream suara untuk lagu ini.")
+        utama.sortedWith(compareBy<AudioStream>({ if (it.format == MediaFormat.M4A) 0 else 1 }, { -bitrate(it) }))
+            .map { keSuara(it) }
+            .distinctBy { it.url }
+    }
+
     /** Judul, penyanyi, dsb. dari ID video (link yang dibagikan). Alamat suaranya ikut disimpan. */
     suspend fun infoLagu(id: String): Lagu = jalankan {
         val info = StreamInfo.getInfo(layanan, "https://www.youtube.com/watch?v=$id")
@@ -176,6 +191,10 @@ object YouTube {
         } else {
             kumpulan.maxBy { bitrate(it) }
         }
+        return keSuara(pilih)
+    }
+
+    private fun keSuara(pilih: AudioStream): Suara {
         val url = pilih.content
         val (mime, ext) = when (pilih.format) {
             MediaFormat.M4A -> "audio/mp4" to "m4a"

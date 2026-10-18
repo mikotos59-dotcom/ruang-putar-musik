@@ -25,7 +25,7 @@ android {
         minSdk = 24            // Android 7.0
         targetSdk = 36         // Android 16
         versionCode = nomorBuild
-        versionName = "0.2.0"
+        versionName = "0.2.1"
         buildConfigField("String", "REPO_GITHUB", "\"$repoGithub\"")
         buildConfigField("String", "VERSI_NEWPIPE", "\"$versiNewPipe\"")
     }

@@ -52,8 +52,33 @@ object Unduhan {
         }
     }
 
+    /** Ditolak server (mis. HTTP 403): coba stream lain. */
+    private class Ditolak(kode: Int) : Exception("HTTP $kode")
+
+    /**
+     * Coba setiap pilihan stream bergantian. Kalau semuanya ditolak (alamat kedaluwarsa / dibatasi),
+     * ambil alamat baru sekali lagi lalu ulangi.
+     */
     private suspend fun jalankan(ctx: Context, lagu: Lagu): String {
-        val suara = YouTube.suara(lagu.id, hemat = false, untukUnduh = true)
+        var galat: Exception? = null
+        repeat(2) { putaran ->
+            if (putaran > 0) {
+                YouTube.lupakan(lagu.id)
+                kotlinx.coroutines.delay(1500)
+            }
+            for (suara in YouTube.suaraUnduh(lagu.id).take(4)) {
+                try {
+                    return tulis(ctx, lagu, suara)
+                } catch (e: Ditolak) {
+                    galat = e
+                    _proses.value = _proses.value + (lagu.id to 0)
+                }
+            }
+        }
+        throw galat ?: IllegalStateException("Tidak ada stream yang bisa diunduh")
+    }
+
+    private suspend fun tulis(ctx: Context, lagu: Lagu, suara: Suara): String {
         val nama = aman("${lagu.artis.ifBlank { "Tanpa artis" }} - ${lagu.judul}") + ".${suara.ext}"
         return if (Build.VERSION.SDK_INT >= 29) {
             val nilai = ContentValues().apply {
@@ -92,25 +117,40 @@ object Unduhan {
     }
 
     /** Diunduh per potongan 1 MB (Range) — server YouTube memperlambat unduhan satu potongan besar. */
+    /**
+     * Diunduh per potongan 1 MB — server YouTube memperlambat unduhan satu potongan besar.
+     * Potongan diminta lewat header Range; kalau ditolak (403), dicoba lagi dengan cara aplikasi
+     * NewPipe (&range=awal-akhir di alamat).
+     */
     private fun tarik(url: String, id: String, keluar: OutputStream) {
         val potong = 1L shl 20
         var awal = 0L
-        var total = -1L
+        var total = Regex("[?&]clen=(\\d+)").find(url)?.groupValues?.get(1)?.toLongOrNull() ?: -1L
+        var lewatAlamat = false
         while (total < 0 || awal < total) {
-            val akhir = awal + potong - 1
-            val req = okhttp3.Request.Builder().url(url).header("Range", "bytes=$awal-$akhir")
-                .header("User-Agent", Jaringan.AGEN).build()
-            Jaringan.media.newCall(req).execute().use { r ->
-                if (r.code !in 200..299) throw IllegalStateException("HTTP ${r.code}")
-                if (total < 0) {
-                    total = r.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull()
-                        ?: r.body?.contentLength()?.takeIf { it > 0 } ?: throw IllegalStateException("Ukuran tidak diketahui")
+            val akhir = if (total > 0) minOf(awal + potong, total) - 1 else awal + potong - 1
+            var n = -1L
+            for (coba in 0..1) {
+                val b = okhttp3.Request.Builder().header("User-Agent", Jaringan.AGEN)
+                if (lewatAlamat) b.url("$url&range=$awal-$akhir") else b.url(url).header("Range", "bytes=$awal-$akhir")
+                val hasil = Jaringan.media.newCall(b.build()).execute().use { r ->
+                    if (r.code == 403 || r.code == 410 || r.code == 429) return@use -r.code.toLong()
+                    if (r.code !in 200..299) throw IllegalStateException("HTTP ${r.code}")
+                    if (total < 0) {
+                        total = r.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull()
+                            ?: if (r.code == 200 && !lewatAlamat) r.body?.contentLength() ?: -1L else -1L
+                        if (total <= 0) throw IllegalStateException("Ukuran tidak diketahui")
+                    }
+                    val m = r.body?.byteStream()?.use { it.copyTo(keluar) } ?: 0L
+                    if (r.code == 200 && !lewatAlamat && m >= total) awal = total - m   // server mengirim semuanya sekaligus
+                    m
                 }
-                val n = r.body?.byteStream()?.use { it.copyTo(keluar) } ?: 0L
-                if (n <= 0) throw IllegalStateException("Unduhan terputus")
-                awal += n
-                if (r.code == 200) awal = total          // server mengirim semuanya sekaligus
+                if (hasil >= 0) { n = hasil; break }
+                if (coba == 1 || lewatAlamat) throw Ditolak((-hasil).toInt())
+                lewatAlamat = true
             }
+            if (n <= 0) throw IllegalStateException("Unduhan terputus")
+            awal += n
             _proses.value = _proses.value + (id to ((awal * 100) / total.coerceAtLeast(1)).toInt().coerceIn(0, 100))
         }
     }
