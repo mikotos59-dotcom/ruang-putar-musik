@@ -98,7 +98,7 @@ fun LayarBeranda(vm: AppVM) {
     var tambahRak by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item { KepalaBeranda(pengaturan.tema == "batik") }
+        item { KepalaBeranda(temaBatik(pengaturan.tema)) }
         if (ditahan > System.currentTimeMillis()) item { BannerDitahan() }
         if (sering.isNotEmpty()) {
             item {
@@ -507,7 +507,7 @@ fun LayarPengaturan(vm: AppVM) {
         Text("Pengaturan", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
         Bagian("Tampilan")
-        BarisPilihan("Tema", listOf("batik" to "Batik", "gelap" to "Gelap", "terang" to "Terang", "otomatis" to "Ikut sistem"), p.tema) { v ->
+        BarisPilihan("Tema", listOf("batik" to "Batik", "batik-terang" to "Batik terang", "gelap" to "Gelap", "terang" to "Terang", "otomatis" to "Ikut sistem"), p.tema) { v ->
             vm.data.ubahPengaturan { it.copy(tema = v) }
         }
 
