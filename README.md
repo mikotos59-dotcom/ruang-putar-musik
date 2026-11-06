@@ -18,6 +18,7 @@ tanpa iklan dan tanpa akun. Dibuat oleh **@SuS_X_x**.
 - Tema Gelap / Terang / Batik
 - Bagikan link YouTube dari aplikasi lain → langsung diputar
 - Pembaruan dari dalam aplikasi: **Pengaturan → Pembaruan**
+- **Bagikan ke teman**: tombol bagikan di Beranda (pojok kanan atas) / Pengaturan → kirim APK atau link lewat WhatsApp, Telegram, Quick Share, dll.
 
 ## Unduh & pasang
 1. Buka halaman **[Releases](../../releases/latest)** → unduh file `.apk` terbaru.

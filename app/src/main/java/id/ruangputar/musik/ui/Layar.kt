@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -76,6 +77,7 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.util.UnstableApi
 import id.ruangputar.musik.App
 import id.ruangputar.musik.BuildConfig
+import id.ruangputar.musik.inti.Bagikan
 import id.ruangputar.musik.inti.Lagu
 import id.ruangputar.musik.inti.Penyanyi
 import id.ruangputar.musik.inti.Rak
@@ -96,9 +98,12 @@ fun LayarBeranda(vm: AppVM) {
     val sering = remember(riwayat) { vm.data.seringDiputar() }
     var dialogRak by remember { mutableStateOf<Rak?>(null) }
     var tambahRak by remember { mutableStateOf(false) }
+    var dialogBagi by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val kartuBagi = remember(pengaturan.kartuBagiSampai, pengaturan.kartuBagiMati) { Bagikan.kartuMuncul(ctx, pengaturan) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item { KepalaBeranda(temaBatik(pengaturan.tema)) }
+        item { KepalaBeranda(temaBatik(pengaturan.tema)) { dialogBagi = true } }
         if (ditahan > System.currentTimeMillis()) item { BannerDitahan() }
         if (sering.isNotEmpty()) {
             item {
@@ -118,6 +123,19 @@ fun LayarBeranda(vm: AppVM) {
                 TextButton(onClick = { vm.data.kembalikanRakBawaan() }) { Text("Kembalikan rak bawaan") }
             }
         }
+        if (kartuBagi) item {
+            KartuBagikan(
+                onBagi = { dialogBagi = true },
+                onTutup = { vm.data.ubahPengaturan { it.copy(kartuBagiSampai = Bagikan.tunda(30)) } },
+                onMati = { vm.data.ubahPengaturan { it.copy(kartuBagiMati = true) }; vm.kabar("Kartu disembunyikan. Tombol bagikan tetap ada di atas Beranda.") },
+            )
+        }
+    }
+
+    if (dialogBagi) DialogBagikan(vm) { sudah ->
+        dialogBagi = false
+        // sudah membagikan -> kartu pengingat istirahat lebih lama
+        if (sudah) vm.data.ubahPengaturan { it.copy(kartuBagiSampai = Bagikan.tunda(60)) }
     }
 
     if (tambahRak) {
@@ -137,7 +155,7 @@ fun LayarBeranda(vm: AppVM) {
 }
 
 @Composable
-private fun KepalaBeranda(batik: Boolean) {
+private fun KepalaBeranda(batik: Boolean, onBagi: () -> Unit) {
     val jam = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val sapa = when (jam) {
         in 4..10 -> "pagi"
@@ -160,7 +178,76 @@ private fun KepalaBeranda(batik: Boolean) {
             Text("Selamat $sapa", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("Ruang Putar Musik", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        IconButton(onClick = onBagi, modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp)) {
+            Icon(Icons.Filled.Share, contentDescription = "Bagikan Ruang Putar Musik", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
+}
+
+/** Kartu kecil di bawah Beranda: pengingat halus untuk membagikan aplikasi. */
+@Composable
+private fun KartuBagikan(onBagi: () -> Unit, onTutup: () -> Unit, onMati: () -> Unit) {
+    Surface(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.padding(start = 16.dp, top = 6.dp, end = 4.dp, bottom = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Suka Ruang Putar? Bagikan ke teman", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onTutup) { Icon(Icons.Filled.Clear, contentDescription = "Tutup") }
+            }
+            Text(
+                "Kirim aplikasinya lewat WhatsApp, Telegram, Quick Share, atau aplikasi lain.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 12.dp),
+            )
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = onBagi) { Icon(Icons.Filled.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Bagikan") }
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = onMati) { Text("Jangan tampilkan lagi") }
+            }
+        }
+    }
+}
+
+/** Pilihan cara membagikan. onSelesai(true) = pengguna sudah memilih salah satu cara. */
+@Composable
+fun DialogBagikan(vm: AppVM, onSelesai: (Boolean) -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var sibuk by remember { mutableStateOf(false) }
+    val mb = remember { Bagikan.ukuranApk(ctx) / (1024.0 * 1024.0) }
+    AlertDialog(
+        onDismissRequest = { if (!sibuk) onSelesai(false) },
+        title = { Text("Bagikan Ruang Putar Musik") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Pilih cara kirim. Setelah itu muncul daftar aplikasi (WhatsApp, Telegram, Quick Share, Bluetooth, dll.).")
+                Button(enabled = !sibuk, modifier = Modifier.fillMaxWidth(), onClick = {
+                    sibuk = true
+                    scope.launch {
+                        runCatching { Bagikan.kirimApk(ctx) }.onFailure { vm.kabar("Gagal menyiapkan file aplikasi. Coba kirim link saja.") }
+                        sibuk = false
+                        onSelesai(true)
+                    }
+                }) {
+                    if (sibuk) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Text(if (mb > 0) "Kirim file aplikasi (APK, ${"%.0f".format(mb)} MB)" else "Kirim file aplikasi (APK)")
+                }
+                OutlinedButton(enabled = !sibuk, modifier = Modifier.fillMaxWidth(), onClick = {
+                    runCatching { Bagikan.kirimLink(ctx) }
+                    onSelesai(true)
+                }) { Text("Kirim link unduhan saja") }
+                Text(
+                    "Kalau WhatsApp menolak file .apk, pakai \"Kirim link\". Teman yang memasang tetap dapat pembaruan otomatis dari dalam aplikasi.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(enabled = !sibuk, onClick = { onSelesai(false) }) { Text("Tutup") } },
+    )
 }
 
 @Composable
@@ -547,6 +634,16 @@ fun LayarPengaturan(vm: AppVM) {
 
         Bagian("Pembaruan")
         BagianPembaruan()
+
+        Bagian("Bagikan ke teman")
+        var dialogBagi by remember { mutableStateOf(false) }
+        OutlinedButton(onClick = { dialogBagi = true }) {
+            Icon(Icons.Filled.Share, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Bagikan Ruang Putar Musik")
+        }
+        if (p.kartuBagiMati) TextButton(onClick = { vm.data.ubahPengaturan { it.copy(kartuBagiMati = false, kartuBagiSampai = 0) } }) {
+            Text("Tampilkan lagi kartu pengingat di Beranda")
+        }
+        if (dialogBagi) DialogBagikan(vm) { dialogBagi = false }
 
         Bagian("Tentang")
         Text("Ruang Putar Musik v${BuildConfig.VERSION_NAME}", fontWeight = FontWeight.SemiBold)
