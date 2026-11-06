@@ -63,9 +63,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         if: steps.cek.outputs.lanjut == 'true'
 
+      - name: Nomor build (versionCode)
+        id: kode
+        if: steps.cek.outputs.lanjut == 'true'
+        # menit sejak 1 Jan 2026 UTC — rumus yang sama dengan build di PC (app/build.gradle.kts)
+        run: echo "kode=$(( ($(date -u +%s) - 1767225600) / 60 ))" >> "$GITHUB_OUTPUT"
+
       - name: Build APK rilis
         if: steps.cek.outputs.lanjut == 'true'
         env:
+          VERSI_KODE: ${{ steps.kode.outputs.kode }}
           KUNCI_SANDI: ${{ secrets.KUNCI_SANDI }}
           KUNCI_ALIAS: ${{ secrets.KUNCI_ALIAS }}
         run: |
@@ -79,9 +86,9 @@ jobs:
         if: steps.cek.outputs.lanjut == 'true'
         run: |
           V=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-          KODE=$(( ${{ github.run_number }} + 100 ))
+          KODE=${{ steps.kode.outputs.kode }}
           mkdir -p hasil
-          cp app/build/outputs/apk/release/*.apk "hasil/RuangPutarMusik-v${V}-b${KODE}.apk"
+          cp app/build/outputs/apk/release/*.apk "hasil/RuangPutarMusik-v${V}.apk"
           echo "versi=$V" >> "$GITHUB_OUTPUT"
           echo "kode=$KODE" >> "$GITHUB_OUTPUT"
           ls -la hasil
@@ -106,15 +113,24 @@ jobs:
           [ "${{ github.event_name }}" = "push" ] && CATATAN="$(git log -1 --pretty=%s) | $CATATAN"
           # versi.json: dibaca aplikasi lewat .../releases/latest/download/versi.json
           # (tanpa API GitHub, jadi tidak kena batas 60 cek/jam per jaringan)
+          # Format 2 — sama dengan versi.json buatan RilisKu (kolom lama tetap ada untuk aplikasi versi lama)
           mkdir -p rilis
           APK=$(basename hasil/*.apk)
-          jq -n --argjson kode ${{ steps.apk.outputs.kode }} \
-            --arg nama "Ruang Putar Musik v${{ steps.apk.outputs.versi }} (build ${{ steps.apk.outputs.kode }})" \
-            --arg catatan "$CATATAN" --arg file "$APK" --argjson ukuran $(stat -c%s hasil/$APK) \
-            '{kode: $kode, nama: $nama, catatan: $catatan, file: $file, ukuran: $ukuran}' > rilis/versi.json
+          KODE=${{ steps.apk.outputs.kode }}
+          TAG="b$KODE"
+          URL="https://github.com/${{ github.repository }}/releases/download/$TAG/$APK"
+          UKURAN=$(stat -c%s hasil/$APK)
+          SHA=$(sha256sum hasil/$APK | cut -d' ' -f1)
+          jq -n --argjson kode $KODE --arg versi "${{ steps.apk.outputs.versi }}" --arg tag "$TAG" \
+            --arg nama "Ruang Putar Musik v${{ steps.apk.outputs.versi }}" \
+            --arg catatan "$CATATAN" --arg file "$APK" --arg url "$URL" --argjson ukuran $UKURAN --arg sha "$SHA" \
+            --arg tanggal "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{format: 2, aplikasi: "Ruang Putar Musik", versi: $versi, kode: $kode, tag: $tag, nama: $nama, catatan: $catatan,
+              tanggal: $tanggal, file: $file, url: $url, ukuran: $ukuran, sha256: $sha, paket: "id.ruangputar.musik",
+              berkas: [{nama: $file, jenis: "apk", url: $url, ukuran: $ukuran, sha256: $sha}]}' > rilis/versi.json
           cat rilis/versi.json
           gh release create "b${{ steps.apk.outputs.kode }}" hasil/*.apk rilis/versi.json \
-            --title "Ruang Putar Musik v${{ steps.apk.outputs.versi }} (build ${{ steps.apk.outputs.kode }})" \
+            --title "Ruang Putar Musik v${{ steps.apk.outputs.versi }}" \
             --notes "$CATATAN" --latest
           # simpan 5 rilis terakhir saja
           gh release list --limit 100 --json tagName --jq '.[5:][].tagName' | while read t; do

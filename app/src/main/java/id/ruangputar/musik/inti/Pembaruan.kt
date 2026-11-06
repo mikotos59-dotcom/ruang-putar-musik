@@ -147,7 +147,8 @@ object Pembaruan {
         return Status.Tersedia(
             nama = o.optString("nama").ifEmpty { "build $kode" },
             kode = kode,
-            url = "https://github.com/$repo/releases/download/b$kode/$file",
+            // format 2 (RilisKu / Actions baru) menyertakan url; format lama: dibentuk dari tag b<kode>
+            url = o.optString("url").ifEmpty { "https://github.com/$repo/releases/download/b$kode/$file" },
             catatan = o.optString("catatan"),
             ukuran = o.optLong("ukuran"),
         )
