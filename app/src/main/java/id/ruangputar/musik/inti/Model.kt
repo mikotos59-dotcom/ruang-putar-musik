@@ -83,12 +83,9 @@ data class Pengaturan(
     val cacheMb: Int = 512,
     val filterCari: String = "lagu",     // lagu (YouTube Music) | video (semua video)
     val minDetik: Int = 60,              // sembunyikan lagu lebih pendek dari ini (0 = tampilkan semua)
-    val kartuBagiSampai: Long = 0,       // kartu "Bagikan ke teman" di Beranda disembunyikan sampai waktu ini
-    val kartuBagiMati: Boolean = false,  // "Jangan tampilkan lagi"
 ) {
     fun keJson(): JSONObject = JSONObject().put("tema", tema).put("kualitas", kualitas)
         .put("kecepatan", kecepatan).put("cacheMb", cacheMb).put("filterCari", filterCari).put("minDetik", minDetik)
-        .put("kartuBagiSampai", kartuBagiSampai).put("kartuBagiMati", kartuBagiMati)
 
     val batasByte: Long
         get() = when (kecepatan) {
@@ -105,8 +102,6 @@ data class Pengaturan(
             cacheMb = o.optInt("cacheMb", 512),
             filterCari = o.optString("filterCari", "lagu"),
             minDetik = o.optInt("minDetik", 60),
-            kartuBagiSampai = o.optLong("kartuBagiSampai", 0L),
-            kartuBagiMati = o.optBoolean("kartuBagiMati", false),
         )
     }
 }

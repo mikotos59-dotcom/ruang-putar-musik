@@ -7,12 +7,8 @@ plugins {
 }
 
 // ---------------------------------------------------------------- versi & kunci
-// Nomor build (versionCode): jumlah menit sejak 1 Jan 2026 UTC — selalu naik, sama aturannya
-// di GitHub Actions maupun di PC (Pabrik SuS), jadi APK dari mana pun bisa dipasang di atas versi sebelumnya.
-// Actions mengirim angka yang sama lewat VERSI_KODE supaya cocok dengan versi.json.
-// (Build lama memakai 100 + nomor run, jadi angka baru ini otomatis lebih besar.)
-val nomorBuild = System.getenv("VERSI_KODE")?.toIntOrNull()
-    ?: ((System.currentTimeMillis() / 1000 - 1767225600L) / 60).toInt()
+// Nomor build: di GitHub Actions = 100 + nomor run (selalu naik), di PC = 3.
+val nomorBuild = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.plus(100)) ?: 3
 // Repo GitHub tempat aplikasi mengecek pembaruan (otomatis dari Actions).
 val repoGithub = System.getenv("GITHUB_REPOSITORY") ?: "mikotos59-dotcom/ruang-putar-musik"
 // Versi NewPipeExtractor (mesin YouTube) — diperbarui otomatis oleh workflow mingguan.
