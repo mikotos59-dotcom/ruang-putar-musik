@@ -52,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -99,7 +100,7 @@ fun LayarBeranda(vm: AppVM) {
     var tambahRak by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        item { KepalaBeranda(temaBatik(pengaturan.tema)) }
+        item { KepalaBeranda(temaBatik(pengaturan.tema), vm) }
         if (ditahan > System.currentTimeMillis()) item { BannerDitahan() }
         if (sering.isNotEmpty()) {
             item {
@@ -138,7 +139,7 @@ fun LayarBeranda(vm: AppVM) {
 }
 
 @Composable
-private fun KepalaBeranda(batik: Boolean) {
+private fun KepalaBeranda(batik: Boolean, vm: AppVM) {
     val jam = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     val sapa = when (jam) {
         in 4..10 -> "pagi"
@@ -161,6 +162,36 @@ private fun KepalaBeranda(batik: Boolean) {
             Text("Selamat $sapa", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("Ruang Putar Musik", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Box(Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp)) { TombolBagikan(vm) }
+    }
+}
+
+/** Ikon bagikan kecil di pojok Beranda: buka menu Bagikan APK / tautan. */
+@Composable
+private fun TombolBagikan(vm: AppVM) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var buka by remember { mutableStateOf(false) }
+    IconButton(onClick = { buka = true }) {
+        Icon(Icons.Filled.Share, "Bagikan aplikasi", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    DropdownMenu(expanded = buka, onDismissRequest = { buka = false }) {
+        DropdownMenuItem(text = { Text("Bagikan APK") }, onClick = { buka = false; bagikanApk(ctx, scope, vm) {} })
+        DropdownMenuItem(text = { Text("Bagikan tautan") }, onClick = {
+            buka = false
+            runCatching { Bagikan.kirimTautan(ctx) }.onFailure { vm.kabar("Tidak ada aplikasi untuk berbagi") }
+        })
+    }
+}
+
+private fun bagikanApk(ctx: android.content.Context, scope: kotlinx.coroutines.CoroutineScope, vm: AppVM, sibuk: (Boolean) -> Unit) {
+    sibuk(true)
+    vm.kabar("Menyiapkan file APK…")
+    scope.launch {
+        val berkas = withContext(Dispatchers.IO) { runCatching { Bagikan.siapkanApk(ctx) }.getOrNull() }
+        sibuk(false)
+        if (berkas == null) vm.kabar("Gagal menyiapkan file APK")
+        else runCatching { Bagikan.kirimApk(ctx, berkas) }.onFailure { vm.kabar("Tidak ada aplikasi untuk berbagi") }
     }
 }
 
@@ -637,15 +668,7 @@ private fun BagianBagikan(vm: AppVM) {
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(enabled = !sibuk, onClick = {
-            sibuk = true
-            scope.launch {
-                val berkas = withContext(Dispatchers.IO) { runCatching { Bagikan.siapkanApk(ctx) }.getOrNull() }
-                sibuk = false
-                if (berkas == null) vm.kabar("Gagal menyiapkan file APK")
-                else runCatching { Bagikan.kirimApk(ctx, berkas) }.onFailure { vm.kabar("Tidak ada aplikasi untuk berbagi") }
-            }
-        }) { Text(if (sibuk) "Menyiapkan…" else "Bagikan APK") }
+        Button(enabled = !sibuk, onClick = { bagikanApk(ctx, scope, vm) { sibuk = it } }) { Text(if (sibuk) "Menyiapkan…" else "Bagikan APK") }
         OutlinedButton(onClick = {
             runCatching { Bagikan.kirimTautan(ctx) }.onFailure { vm.kabar("Tidak ada aplikasi untuk berbagi") }
         }) { Text("Bagikan tautan") }
