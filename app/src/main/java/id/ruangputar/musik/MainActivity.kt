@@ -40,6 +40,11 @@ import androidx.core.content.ContextCompat
 import id.ruangputar.musik.inti.Pembaruan
 import id.ruangputar.musik.ui.AppVM
 import id.ruangputar.musik.ui.DialogPembaruan
+import id.ruangputar.musik.ui.DialogUnduhPlaylist
+import id.ruangputar.musik.ui.DialogTambahKePlaylist
+import id.ruangputar.musik.ui.PanelUnduhan
+import id.ruangputar.musik.ui.LayarPlaylistYt
+import id.ruangputar.musik.ui.LayarPlaylist
 import id.ruangputar.musik.ui.Ikon
 import id.ruangputar.musik.ui.LayarBeranda
 import id.ruangputar.musik.ui.LayarCari
@@ -115,13 +120,11 @@ private fun Aplikasi(vm: AppVM) {
             snackbarHost = { SnackbarHost(snack) },
             bottomBar = {
                 Column {
+                    PanelUnduhan(vm)
                     MiniPemutar(vm)
                     NavigationBar {
-                        fun pilih(t: Tab) {
-                            vm.tutupPenyanyi()
-                            vm.tab = t
-                        }
-                        val terpilih = if (vm.penyanyiDibuka != null) null else vm.tab
+                        fun pilih(t: Tab) = vm.bukaTab(t)
+                        val terpilih = if (vm.penyanyiDibuka != null || vm.playlistYt != null) null else vm.tab
                         NavigationBarItem(terpilih == Tab.BERANDA, { pilih(Tab.BERANDA) },
                             icon = { Icon(Icons.Filled.Home, null) }, label = { Text("Beranda") })
                         NavigationBarItem(terpilih == Tab.CARI, { pilih(Tab.CARI) },
@@ -137,8 +140,14 @@ private fun Aplikasi(vm: AppVM) {
             Box(Modifier.padding(pad)) {
                 val p = vm.penyanyiDibuka
                 val h = vm.halamanPenyanyi
+                val yt = vm.playlistYt
+                val pl = vm.playlistDibuka
                 if (p != null && h != null) {
                     LayarPenyanyi(vm, p, h)
+                } else if (yt != null) {
+                    LayarPlaylistYt(vm, yt)
+                } else if (pl != null && vm.tab == Tab.PUSTAKA) {
+                    LayarPlaylist(vm, pl)
                 } else {
                     when (vm.tab) {
                         Tab.BERANDA -> LayarBeranda(vm)
@@ -151,5 +160,7 @@ private fun Aplikasi(vm: AppVM) {
         }
         if (vm.pemutarTerbuka && vm.laguKini != null) PemutarPenuh(vm)
         DialogPembaruan()
+        DialogTambahKePlaylist(vm)
+        DialogUnduhPlaylist(vm)
     }
 }

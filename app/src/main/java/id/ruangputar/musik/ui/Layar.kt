@@ -106,7 +106,7 @@ fun LayarBeranda(vm: AppVM) {
             item {
                 JudulRak("Sering kamu putar", null, null)
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    itemsIndexed(sering) { i, l -> KartuLagu(l) { vm.putar(sering, i) } }
+                    itemsIndexed(sering) { i, l -> KartuLagu(l, vm) { vm.putar(sering, i) } }
                 }
             }
         }
@@ -254,7 +254,7 @@ private fun RakBeranda(r: Rak, vm: AppVM, onUbah: () -> Unit) {
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            itemsIndexed(isi) { i, l -> KartuLagu(l) { vm.putar(isi, i) } }
+            itemsIndexed(isi) { i, l -> KartuLagu(l, vm) { vm.putar(isi, i) } }
         }
         pesan != null -> Text(pesan, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         else -> Text("Tidak ada lagu.", Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -357,9 +357,10 @@ fun LayarCari(vm: AppVM) {
         LazyColumn(Modifier.weight(1f), state = daftarState) {
             if (daftar.isNotEmpty()) {
                 item {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { vm.putar(daftar) }) { Text("Putar semua") }
-                        OutlinedButton(onClick = { daftar.forEach { vm.antre(it) } }) { Text("Tambah ke antrean") }
+                        OutlinedButton(onClick = { daftar.forEach { vm.antre(it) } }) { Text("Antre semua") }
+                        OutlinedButton(onClick = { vm.tambahKePlaylist = daftar }) { Text("+ Playlist") }
                     }
                 }
             } else if (!h.memuat && h.galat == null) {
@@ -374,7 +375,7 @@ fun LayarCari(vm: AppVM) {
 // ====================================================================== Pustaka
 @Composable
 fun LayarPustaka(vm: AppVM) {
-    var sub by rememberSaveable { mutableIntStateOf(0) }
+    val sub = vm.subPustaka
     Column(Modifier.fillMaxSize()) {
         Text(
             "Pustaka", Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
@@ -384,20 +385,21 @@ fun LayarPustaka(vm: AppVM) {
             Modifier.horizontalScroll(rememberScrollState()).padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf("Favorit", "Riwayat", "Offline", "Penyanyi").forEachIndexed { i, t -> Pilihan(t, sub == i) { sub = i } }
+            listOf("Favorit", "Playlist", "Riwayat", "Offline", "Penyanyi").forEachIndexed { i, t -> Pilihan(t, sub == i) { vm.subPustaka = i } }
         }
         when (sub) {
             0 -> {
                 val favorit by vm.data.favorit.collectAsState()
                 DaftarLagu(vm, favorit, "Belum ada favorit. Ketuk ⋮ di sebuah lagu, lalu ♥ Favoritkan.")
             }
-            1 -> {
+            1 -> DaftarPlaylist(vm)
+            2 -> {
                 val riwayat by vm.data.riwayat.collectAsState()
                 DaftarLagu(vm, riwayat, "Riwayat kosong.", ekstra = {
                     TextButton(onClick = { vm.data.hapusRiwayat() }) { Text("Hapus riwayat") }
                 })
             }
-            2 -> HalamanOffline(vm)
+            3 -> HalamanOffline(vm)
             else -> HalamanDaftarPenyanyi(vm)
         }
     }
@@ -410,10 +412,11 @@ private fun DaftarLagu(vm: AppVM, daftar: List<Lagu>, kosong: String, ekstra: (@
             item { Kosong(kosong) }
         } else {
             item {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { vm.putar(daftar) }) { Text("Putar semua") }
                     OutlinedButton(onClick = { vm.putarAcak(daftar) }) { Text("Acak") }
+                    OutlinedButton(onClick = { vm.tambahKePlaylist = daftar }) { Text("+ Playlist") }
                     ekstra?.invoke()
                 }
             }
@@ -472,7 +475,7 @@ private fun HalamanDaftarPenyanyi(vm: AppVM) {
                 Modifier.fillMaxWidth().clickable { vm.bukaPenyanyi(p.nama, p.url) }.padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.weight(1f)) { KepalaPenyanyi(p.nama) }
+                Box(Modifier.weight(1f)) { KepalaPenyanyi(p.nama, p.foto, besar = false) }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Menu") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -495,7 +498,7 @@ fun LayarPenyanyi(vm: AppVM, p: Penyanyi, h: Halaman) {
         val adaRak = semuaRak.any { it.channel == p.url }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.tutupPenyanyi() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali") }
-            Box(Modifier.weight(1f)) { KepalaPenyanyi(p.nama.ifEmpty { "Penyanyi" }) }
+            Box(Modifier.weight(1f)) { KepalaPenyanyi(p.nama.ifEmpty { "Penyanyi" }, p.foto) }
         }
         Row(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (ikut) {
@@ -517,9 +520,10 @@ fun LayarPenyanyi(vm: AppVM, p: Penyanyi, h: Halaman) {
         LazyColumn(Modifier.weight(1f)) {
             if (daftar.isNotEmpty()) {
                 item {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { vm.putar(daftar) }) { Text("Putar semua") }
                         OutlinedButton(onClick = { vm.putarAcak(daftar) }) { Text("Acak") }
+                        OutlinedButton(onClick = { vm.tambahKePlaylist = daftar }) { Text("+ Playlist") }
                     }
                 }
             }
@@ -556,7 +560,9 @@ fun LayarPengaturan(vm: AppVM) {
         }
         BarisPilihan(
             "Kecepatan unduh", listOf("rendah" to "Rendah ± 1 MB/s", "normal" to "Normal ± 3 MB/s", "tanpa" to "Tanpa batas"),
-            p.kecepatan, "Berlaku untuk semua unduhan sekaligus (putar & Offline). Rendah = tidak mengganggu game.",
+            p.kecepatan, "Berlaku untuk semua unduhan sekaligus (putar & Offline). Rendah = tidak mengganggu game. " +
+                "Tanpa batas = paling cepat, tapi bisa membuat internet lag dan lebih cepat dicurigai YouTube. " +
+                "Unduhan banyak lagu selalu diberi jeda otomatis (bukan error).",
         ) { v -> vm.data.ubahPengaturan { it.copy(kecepatan = v) } }
 
         Bagian("Cache")

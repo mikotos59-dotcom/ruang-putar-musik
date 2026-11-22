@@ -37,6 +37,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -135,10 +138,17 @@ fun PemutarPenuh(vm: AppVM) {
                 Spacer(Modifier.height(20.dp))
                 Text(lagu.judul, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
-                Text(
-                    lagu.artis, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable(enabled = lagu.channel.isNotEmpty()) { vm.bukaPenyanyi(lagu.artis, lagu.channel) },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TeksPenyanyi(lagu, vm, MaterialTheme.typography.bodyLarge, Modifier.weight(1f, fill = false))
+                    if (!lagu.lokal && lagu.channel.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = { vm.bukaPenyanyi(lagu.artis, lagu.channel) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(32.dp),
+                        ) { Text("Buka channel", style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
                 vm.galatPutar?.let {
                     Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 6.dp))
@@ -208,6 +218,7 @@ fun PemutarPenuh(vm: AppVM) {
                             }
                         }
                     }
+                    IconButton(onClick = { vm.tambahKePlaylist = listOf(lagu) }) { Icon(Ikon.TambahPlaylist, "Tambah ke playlist") }
                     // gunting: tekan 1 = awal, tekan 2 = akhir & ulang, tekan 3 (tong sampah) = hapus
                     IconButton(onClick = { vm.alihPotong() }) {
                         Icon(

@@ -13,7 +13,6 @@ import id.ruangputar.musik.ui.PemuatGambar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -33,23 +32,36 @@ object Unduhan {
     /** Lagu yang sedang diunduh dan persennya. */
     val proses: StateFlow<Map<String, Int>> = _proses
 
-    fun unduh(ctx: Context, lagu: Lagu, selesai: (String) -> Unit) {
-        if (lagu.lokal || lagu.id in _proses.value || App.data.unduhan.value.containsKey(lagu.id)) return
+    /** Sudah ada di Offline? */
+    fun sudahDiunduh(id: String): Boolean = id.isNotEmpty() && App.data.unduhan.value.containsKey(id)
+
+    /**
+     * Unduh satu lagu sekarang juga (dipanggil oleh [AntreanUnduh], yang mengatur jeda & antrean).
+     * Mengembalikan alamat file. Galat dilempar ke pemanggil.
+     */
+    suspend fun unduhSekarang(ctx: Context, lagu: Lagu): String = withContext(Dispatchers.IO) {
+        App.data.unduhan.value[lagu.id]?.let { return@withContext it }
         _proses.value = _proses.value + (lagu.id to 0)
-        App.scope.launch(Dispatchers.IO) {
-            val pesan = try {
-                val uri = jalankan(ctx.applicationContext, lagu)
-                simpanSampul(ctx.applicationContext, lagu)
-                App.data.catatUnduhan(lagu.id, uri)
-                "✓ “${lagu.judul}” tersimpan di Music/$FOLDER"
-            } catch (e: Exception) {
-                if (YouTube.adalahGalatBot(e)) "YouTube sedang menahan permintaan. Coba unduh lagi nanti."
-                else "Gagal mengunduh “${lagu.judul}”: ${e.message ?: e.javaClass.simpleName}"
-            } finally {
-                _proses.value = _proses.value - lagu.id
-            }
-            withContext(Dispatchers.Main) { selesai(pesan) }
+        try {
+            val uri = jalankan(ctx.applicationContext, lagu)
+            simpanSampul(ctx.applicationContext, lagu)
+            App.data.catatUnduhan(lagu.id, uri)
+            uri
+        } finally {
+            _proses.value = _proses.value - lagu.id
         }
+    }
+
+    /** Hapus file unduhan sebuah lagu (dan sampulnya). Lagu tetap bisa diputar online. */
+    fun hapusFile(ctx: Context, id: String): Boolean {
+        val alamat = App.data.unduhan.value[id] ?: return false
+        val ok = runCatching {
+            val uri = Uri.parse(alamat)
+            if (uri.scheme == "file") File(uri.path ?: "").delete() else ctx.contentResolver.delete(uri, null, null) > 0
+        }.getOrDefault(false)
+        runCatching { fileSampul(ctx, id).delete() }
+        App.data.lupakanUnduhan(id)
+        return ok
     }
 
     /** Ditolak server (mis. HTTP 403): coba stream lain. */

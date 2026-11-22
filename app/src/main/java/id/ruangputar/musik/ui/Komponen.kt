@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -166,13 +168,19 @@ fun BarisLagu(
                 lagu.judul, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 fontWeight = FontWeight.SemiBold, color = if (aktif) warnaAktif else MaterialTheme.colorScheme.onSurface,
             )
-            val ket = buildList {
-                if (lagu.artis.isNotEmpty()) add(lagu.artis)
+            val ekor = buildList {
                 if (lagu.durasi > 0) add(formatWaktu(lagu.durasi))
-                if (lagu.lokal || unduhan.containsKey(lagu.id)) add("Offline")
+                if (lagu.lokal || unduhan.containsKey(lagu.id)) add("✓ Offline")
             }.joinToString(" · ")
-            Text(ket, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (lagu.artis.isNotEmpty()) TeksPenyanyi(lagu, vm, MaterialTheme.typography.bodySmall, Modifier.weight(1f, fill = false))
+                if (ekor.isNotEmpty()) {
+                    Text(
+                        (if (lagu.artis.isNotEmpty()) " · " else "") + ekor, maxLines = 1, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             proses[lagu.id]?.let { p ->
                 LinearProgressIndicator(progress = { p / 100f }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             }
@@ -188,10 +196,11 @@ fun BarisLagu(
                 item("Putar setelah ini") { vm.putarBerikutnya(lagu) }
                 item("Tambah ke antrean") { vm.antre(lagu) }
                 item(if (favorit.any { it.kunci == lagu.kunci }) "Hapus dari Favorit" else "♥ Favoritkan") { vm.alihFavorit(lagu) }
+                item("Tambah ke playlist…") { vm.tambahKePlaylist = listOf(lagu) }
                 if (!lagu.lokal) {
                     if (!unduhan.containsKey(lagu.id)) item("Unduh ke Offline") { vm.unduh(ctx, lagu) }
                     if (lagu.channel.isNotEmpty()) {
-                        item("Lagu lain dari ${lagu.artis.ifEmpty { "penyanyi ini" }}") { vm.bukaPenyanyi(lagu.artis, lagu.channel) }
+                        item("Lihat channel ${lagu.artis.ifEmpty { "penyanyi" }} ›") { vm.bukaPenyanyi(lagu.artis, lagu.channel) }
                         item(if (vm.data.mengikuti(lagu.channel)) "Berhenti mengikuti" else "Ikuti ${lagu.artis}") {
                             vm.alihIkuti(lagu.artis, lagu.channel)
                         }
@@ -205,18 +214,31 @@ fun BarisLagu(
 
 /** Kartu di rak Beranda. */
 @Composable
-fun KartuLagu(lagu: Lagu, onKlik: () -> Unit) {
+fun KartuLagu(lagu: Lagu, vm: AppVM, onKlik: () -> Unit) {
     Column(Modifier.width(140.dp).clickable(onClick = onKlik)) {
         Sampul(lagu.sampul, 140.dp, RoundedCornerShape(10.dp))
         Text(
             lagu.judul, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp),
         )
-        Text(
-            lagu.artis, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        TeksPenyanyi(lagu, vm, MaterialTheme.typography.bodySmall)
     }
+}
+
+/**
+ * Nama penyanyi yang bisa diketuk (membuka channel) — diberi tanda › dan warna aksen
+ * supaya pengguna tahu nama ini bisa diketuk.
+ */
+@Composable
+fun TeksPenyanyi(lagu: Lagu, vm: AppVM, gaya: TextStyle, modifier: Modifier = Modifier) {
+    val bisa = !lagu.lokal && lagu.channel.isNotEmpty()
+    val teks = lagu.artis.ifEmpty { if (lagu.lokal) "File di HP" else "" }
+    Text(
+        if (bisa) "$teks ›" else teks,
+        if (bisa) modifier.clickable { vm.bukaPenyanyi(lagu.artis, lagu.channel) } else modifier,
+        maxLines = 1, overflow = TextOverflow.Ellipsis, style = gaya,
+        color = if (bisa) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -257,13 +279,34 @@ fun Kosong(teks: String) {
 }
 
 @Composable
-fun KepalaPenyanyi(nama: String) {
+fun KepalaPenyanyi(nama: String, foto: String = "", besar: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Person, null) }
+        FotoPenyanyi(nama, foto, if (besar) 56.dp else 44.dp)
         Spacer(Modifier.width(12.dp))
-        Text(nama, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(
+            nama, style = if (besar) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Foto profil channel (bulat). Belum ada foto -> huruf depan nama. */
+@Composable
+fun FotoPenyanyi(nama: String, foto: String, ukuran: Dp) {
+    if (foto.isNotEmpty()) {
+        Sampul(foto, ukuran, CircleShape)
+        return
+    }
+    Box(
+        Modifier.size(ukuran).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        val huruf = nama.trim().firstOrNull { it.isLetterOrDigit() }?.uppercase()
+        if (huruf != null) {
+            Text(huruf, color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium)
+        } else {
+            Icon(Icons.Filled.Person, null, Modifier.size(ukuran / 2), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
     }
 }

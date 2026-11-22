@@ -17,6 +17,7 @@ class Penyimpanan(private val file: File, private val scope: CoroutineScope) {
     private val _riwayat = MutableStateFlow<List<Lagu>>(emptyList())
     private val _rak = MutableStateFlow(RAK_BAWAAN)
     private val _penyanyi = MutableStateFlow<List<Penyanyi>>(emptyList())
+    private val _playlist = MutableStateFlow<List<Playlist>>(emptyList())
     private val _unduhan = MutableStateFlow<Map<String, String>>(emptyMap())   // id video -> content uri
     private val _pengaturan = MutableStateFlow(Pengaturan())
     private val hitungan = HashMap<String, JSONObject>()                      // id -> {n, t, lagu}
@@ -25,6 +26,7 @@ class Penyimpanan(private val file: File, private val scope: CoroutineScope) {
     val riwayat: StateFlow<List<Lagu>> = _riwayat
     val rak: StateFlow<List<Rak>> = _rak
     val penyanyi: StateFlow<List<Penyanyi>> = _penyanyi
+    val playlist: StateFlow<List<Playlist>> = _playlist
     val unduhan: StateFlow<Map<String, String>> = _unduhan
     val pengaturan: StateFlow<Pengaturan> = _pengaturan
 
@@ -45,6 +47,7 @@ class Penyimpanan(private val file: File, private val scope: CoroutineScope) {
         _riwayat.value = d.optJSONArray("riwayat").daftar(Lagu::dariJson)
         d.optJSONArray("rak")?.let { _rak.value = it.daftar(Rak::dariJson) }
         _penyanyi.value = d.optJSONArray("penyanyi").daftar(Penyanyi::dariJson)
+        _playlist.value = d.optJSONArray("playlist").daftar(Playlist::dariJson)
         _pengaturan.value = Pengaturan.dariJson(d.optJSONObject("pengaturan"))
         d.optJSONObject("unduhan")?.let { o ->
             _unduhan.value = o.keys().asSequence().associateWith { o.optString(it) }
@@ -71,6 +74,7 @@ class Penyimpanan(private val file: File, private val scope: CoroutineScope) {
             .put("riwayat", JSONArray(_riwayat.value.map { it.keJson() }))
             .put("rak", JSONArray(_rak.value.map { it.keJson() }))
             .put("penyanyi", JSONArray(_penyanyi.value.map { it.keJson() }))
+            .put("playlist", JSONArray(_playlist.value.map { it.keJson() }))
             .put("pengaturan", _pengaturan.value.keJson())
             .put("unduhan", JSONObject(_unduhan.value as Map<*, *>))
             .put("hitungan", JSONObject().also { o -> synchronized(hitungan) { hitungan.forEach { (k, v) -> o.put(k, v) } } })
@@ -159,13 +163,77 @@ class Penyimpanan(private val file: File, private val scope: CoroutineScope) {
     // ------------------------------------------------------------ penyanyi
     fun mengikuti(url: String) = url.isNotEmpty() && _penyanyi.value.any { it.url == url }
 
-    fun alihkanIkuti(nama: String, url: String): Boolean {
+    fun alihkanIkuti(nama: String, url: String, foto: String = ""): Boolean {
         if (url.isEmpty()) return false
         val ada = mengikuti(url)
-        _penyanyi.value = if (ada) _penyanyi.value.filterNot { it.url == url } else listOf(Penyanyi(nama, url)) + _penyanyi.value
+        _penyanyi.value = if (ada) _penyanyi.value.filterNot { it.url == url } else listOf(Penyanyi(nama, url, foto)) + _penyanyi.value
         simpanNanti()
         return !ada
     }
+
+    /** Simpan foto profil penyanyi yang diikuti (yang tidak diikuti diabaikan). */
+    fun aturFotoPenyanyi(url: String, foto: String) {
+        if (foto.isEmpty() || _penyanyi.value.none { it.url == url && it.foto != foto }) return
+        _penyanyi.value = _penyanyi.value.map { if (it.url == url) it.copy(foto = foto) else it }
+        simpanNanti()
+    }
+
+    // ------------------------------------------------------------ playlist
+    fun playlistDengan(id: String): Playlist? = _playlist.value.firstOrNull { it.id == id }
+
+    private fun namaUnik(nama: String): String {
+        val dasar = nama.trim().ifEmpty { "Playlist baru" }.take(80)
+        val ada = _playlist.value.map { it.nama.lowercase() }.toSet()
+        if (dasar.lowercase() !in ada) return dasar
+        var n = 2
+        while ("$dasar ($n)".lowercase() in ada) n++
+        return "$dasar ($n)"
+    }
+
+    fun buatPlaylist(nama: String, lagu: List<Lagu> = emptyList(), sumber: String = ""): Playlist {
+        val p = Playlist("p${System.currentTimeMillis()}", namaUnik(nama), lagu.distinctBy { it.kunci }, sumber = sumber)
+        _playlist.value = listOf(p) + _playlist.value
+        simpanNanti()
+        return p
+    }
+
+    private fun ubahPlaylist(id: String, ubah: (Playlist) -> Playlist) {
+        _playlist.value = _playlist.value.map { if (it.id == id) ubah(it) else it }
+        simpanNanti()
+    }
+
+    fun gantiNamaPlaylist(id: String, nama: String) {
+        val baru = nama.trim().take(80)
+        if (baru.isNotEmpty()) ubahPlaylist(id) { it.copy(nama = baru) }
+    }
+
+    fun hapusPlaylist(id: String) {
+        _playlist.value = _playlist.value.filterNot { it.id == id }
+        simpanNanti()
+    }
+
+    /** true = lagu baru ditambahkan; false = sudah ada di playlist itu. */
+    fun tambahKePlaylist(id: String, lagu: Lagu): Boolean {
+        val p = playlistDengan(id) ?: return false
+        if (p.lagu.any { it.kunci == lagu.kunci }) return false
+        ubahPlaylist(id) { it.copy(lagu = it.lagu + lagu) }
+        return true
+    }
+
+    fun hapusDariPlaylist(id: String, kunci: String) = ubahPlaylist(id) { p -> p.copy(lagu = p.lagu.filterNot { it.kunci == kunci }) }
+
+    fun geserDiPlaylist(id: String, dari: Int, ke: Int) = ubahPlaylist(id) { p ->
+        if (dari !in p.lagu.indices || ke !in p.lagu.indices) p
+        else p.copy(lagu = p.lagu.toMutableList().apply { add(ke, removeAt(dari)) })
+    }
+
+    fun aturLaguPlaylist(id: String, lagu: List<Lagu>) = ubahPlaylist(id) { it.copy(lagu = lagu) }
+
+    fun aturOfflinePlaylist(id: String, offline: Boolean) = ubahPlaylist(id) { it.copy(offline = offline) }
+
+    /** Lagu ini ada di playlist offline lain (selain [kecuali])? */
+    fun diPlaylistOffline(kunci: String, kecuali: String? = null): Boolean =
+        _playlist.value.any { p -> p.offline && p.id != kecuali && p.lagu.any { it.kunci == kunci } }
 
     // ------------------------------------------------------------ unduhan & pengaturan
     fun catatUnduhan(id: String, uri: String) {

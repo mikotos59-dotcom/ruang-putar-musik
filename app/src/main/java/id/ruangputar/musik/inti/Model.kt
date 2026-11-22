@@ -68,11 +68,43 @@ data class Rak(
     }
 }
 
-data class Penyanyi(val nama: String, val url: String) {
-    fun keJson(): JSONObject = JSONObject().put("nama", nama).put("url", url)
+/** Penyanyi / channel yang diikuti. [foto] = URL foto profil channel (kosong = belum diketahui). */
+data class Penyanyi(val nama: String, val url: String, val foto: String = "") {
+    fun keJson(): JSONObject = JSONObject().put("nama", nama).put("url", url).put("foto", foto)
 
     companion object {
-        fun dariJson(o: JSONObject) = Penyanyi(o.optString("nama"), o.optString("url"))
+        fun dariJson(o: JSONObject) = Penyanyi(o.optString("nama"), o.optString("url"), o.optString("foto"))
+    }
+}
+
+/**
+ * Playlist buatan pengguna. Urutan [lagu] = susunan pengguna.
+ * [offline] = pengguna menekan "Unduh semua": lagu yang ditambahkan nanti otomatis ikut diunduh.
+ * [sumber] = link playlist YouTube asal (kalau hasil impor).
+ */
+data class Playlist(
+    val id: String,
+    val nama: String,
+    val lagu: List<Lagu> = emptyList(),
+    val offline: Boolean = false,
+    val sumber: String = "",
+    val dibuat: Long = System.currentTimeMillis(),
+) {
+    val totalDetik: Long get() = lagu.sumOf { it.durasi }
+
+    fun keJson(): JSONObject = JSONObject().put("id", id).put("nama", nama)
+        .put("lagu", JSONArray(lagu.map { it.keJson() })).put("offline", offline)
+        .put("sumber", sumber).put("dibuat", dibuat)
+
+    companion object {
+        fun dariJson(o: JSONObject) = Playlist(
+            id = o.optString("id"),
+            nama = o.optString("nama", "Playlist"),
+            lagu = o.optJSONArray("lagu").daftar(Lagu::dariJson),
+            offline = o.optBoolean("offline", false),
+            sumber = o.optString("sumber"),
+            dibuat = o.optLong("dibuat", System.currentTimeMillis()),
+        )
     }
 }
 

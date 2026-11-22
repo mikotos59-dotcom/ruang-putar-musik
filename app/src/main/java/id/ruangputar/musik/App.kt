@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import id.ruangputar.musik.inti.AntreanUnduh
 import id.ruangputar.musik.inti.Jaringan
 import id.ruangputar.musik.inti.Penyimpanan
 import id.ruangputar.musik.inti.YouTube
@@ -23,6 +24,7 @@ class App : Application() {
         aku = this
         YouTube.mulai()
         data = Penyimpanan(File(filesDir, "data.json"), scope)
+        AntreanUnduh.muat()              // sisa unduhan yang terputus -> ditawarkan untuk dilanjutkan
         scope.launch {
             data.pengaturan.collect { Jaringan.pembatas.batas = it.batasByte }
         }

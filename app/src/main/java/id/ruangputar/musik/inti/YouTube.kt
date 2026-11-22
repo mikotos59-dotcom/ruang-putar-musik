@@ -18,6 +18,7 @@ import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.AudioStream
@@ -36,6 +37,9 @@ class Hasil(val lagu: List<Lagu>, val berikut: Page?) {
 
 /** Alamat suara yang siap diputar/diunduh. */
 class Suara(val url: String, val mime: String, val ext: String, val bitrate: Int, val berlakuSampai: Long)
+
+/** Keterangan playlist YouTube (untuk halaman playlist & impor). */
+class InfoPlaylist(val nama: String, val pemilik: String, val jumlah: Long, val sampul: String, val url: String)
 
 class DitahanYouTube : Exception("YouTube sementara menahan permintaan (dikira bot)")
 
@@ -227,7 +231,10 @@ object YouTube {
         val dariTab = try {
             jalankan {
                 val tab = tabChannel[url] ?: run {
-                    val tabs = ChannelInfo.getInfo(layanan, url).tabs
+                    val info = ChannelInfo.getInfo(layanan, url)
+                    // foto profil channel ikut disimpan (dipakai di daftar penyanyi yang diikuti)
+                    runCatching { gambar(info.avatars, 176) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { simpananFoto[url] = it }
+                    val tabs = info.tabs
                     (tabs.firstOrNull { ChannelTabs.TRACKS in it.contentFilters }
                         ?: tabs.firstOrNull { ChannelTabs.VIDEOS in it.contentFilters })
                         ?.also { tabChannel[url] = it }
@@ -251,6 +258,46 @@ object YouTube {
         if (nama.isBlank()) throw IllegalStateException("Channel ini tidak punya daftar lagu.")
         channelLewatCari[url] = true
         return cariPenyanyi(nama, null)
+    }
+
+    // ------------------------------------------------------------------ foto profil channel
+    private val simpananFoto = ConcurrentHashMap<String, String>()
+
+    /** Foto yang sudah diketahui tanpa meminta lagi ke YouTube. */
+    fun fotoTersimpan(url: String): String? = simpananFoto[url]
+
+    suspend fun fotoChannel(url: String): String {
+        simpananFoto[url]?.let { return it }
+        return jalankan {
+            gambar(ChannelInfo.getInfo(layanan, url).avatars, 176).also { if (it.isNotEmpty()) simpananFoto[url] = it }
+        }
+    }
+
+    // ------------------------------------------------------------------ playlist YouTube
+    /** Link playlist (youtube.com/playlist?list=…, atau link lain yang hanya berisi list=). */
+    fun adalahPlaylist(url: String?): Boolean = try {
+        !url.isNullOrEmpty() && "list=" in url && layanan.playlistLHFactory.acceptUrl(url)
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Halaman pertama playlist (± 100 lagu) + keterangannya. Durasi minimal tidak dipakai: isi playlist apa adanya. */
+    suspend fun bukaPlaylist(url: String): Pair<InfoPlaylist, Hasil> = jalankan {
+        val info = PlaylistInfo.getInfo(layanan, url)
+        val ket = InfoPlaylist(
+            nama = info.name ?: "Playlist YouTube",
+            pemilik = info.uploaderName ?: "",
+            jumlah = info.streamCount,
+            sampul = runCatching { gambar(info.thumbnails, 320) }.getOrDefault(""),
+            url = url,
+        )
+        ket to Hasil(keLagu(info.relatedItems, 0, 0), info.nextPage?.takeIf { Page.isValid(it) })
+    }
+
+    /** Halaman berikutnya (± 100 lagu lagi). */
+    suspend fun lanjutPlaylist(url: String, halaman: Page): Hasil = jalankan {
+        val p = PlaylistInfo.getMoreItems(layanan, url, halaman)
+        Hasil(keLagu(p.items, 0, 0), p.nextPage?.takeIf { Page.isValid(it) })
     }
 
     /** Lagu penyanyi lewat pencarian YouTube Music; yang penyanyinya cocok ditaruh paling atas. */

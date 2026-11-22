@@ -24,7 +24,10 @@ import com.google.common.util.concurrent.ListenableFuture
 import id.ruangputar.musik.App
 import id.ruangputar.musik.inti.Potong
 import id.ruangputar.musik.inti.formatWaktu
+import id.ruangputar.musik.inti.AntreanUnduh
 import id.ruangputar.musik.inti.DitahanYouTube
+import id.ruangputar.musik.inti.InfoPlaylist
+import id.ruangputar.musik.inti.Playlist
 import id.ruangputar.musik.inti.Hasil
 import id.ruangputar.musik.inti.LayananPutar
 import id.ruangputar.musik.inti.Lagu
@@ -90,8 +93,31 @@ class Halaman(private val vm: AppVM, private val ambil: suspend (Page?) -> Hasil
     }
 }
 
+/** Halaman playlist YouTube yang dibuka dari link: dimuat bertahap (± 100 lagu per halaman). */
+class HalamanPlaylistYt(val url: String) {
+    var info by mutableStateOf<InfoPlaylist?>(null)
+    var lagu by mutableStateOf<List<Lagu>>(emptyList())
+    var berikut: Page? = null
+    var adaBerikut by mutableStateOf(false)
+    var memuat by mutableStateOf(false)
+    var galat by mutableStateOf<String?>(null)
+    /** Sedang diimpor: jumlah lagu yang sudah terkumpul (-1 = tidak sedang mengimpor). */
+    var impor by mutableIntStateOf(-1)
+}
+
 class AppVM(app: Application) : AndroidViewModel(app) {
     val data = App.data
+
+    init {
+        AntreanUnduh.kabar = { kabar(it) }
+        viewModelScope.launch {
+            delay(15_000)
+            lengkapiFotoPenyanyi()
+        }
+    }
+
+    /** Sub-tab Pustaka: 0 Favorit, 1 Playlist, 2 Riwayat, 3 Offline, 4 Penyanyi. */
+    var subPustaka by mutableIntStateOf(0)
 
     // ------------------------------------------------------------------ navigasi
     var tab by mutableStateOf(Tab.BERANDA)
@@ -183,12 +209,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         laguKini = laguDari(c.currentMediaItem)
         main = c.isPlaying
         memuatLagu = c.playbackState == Player.STATE_BUFFERING
+        AntreanUnduh.pemutarMemuat = memuatLagu
         durasi = if (c.duration == C.TIME_UNSET) 0 else c.duration.coerceAtLeast(0)
         posisi = c.currentPosition.coerceAtLeast(0)
         antrean = (0 until c.mediaItemCount).mapNotNull { laguDari(c.getMediaItemAt(it)) }
         indeksKini = c.currentMediaItemIndex
         acak = c.shuffleModeEnabled
         ulang = c.repeatMode
+        cekLanjutan(c)
         galatPutar = c.playerError?.let {
             if (YouTube.sedangDitahan) "YouTube sedang menahan permintaan (dikira bot). Lagu yang sudah di cache / Offline tetap bisa diputar."
             else "Tidak bisa memutar lagu ini (${it.errorCodeName})."
@@ -210,12 +238,43 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun putar(daftar: List<Lagu>, mulai: Int = 0) {
         val c = controller ?: return kabar("Pemutar belum siap, coba lagi.")
         if (daftar.isEmpty()) return
+        ambilLanjutan = null
         c.setMediaItems(daftar.map(::item), mulai.coerceIn(0, daftar.size - 1), 0)
         c.prepare()
         c.play()
     }
 
     fun putarAcak(daftar: List<Lagu>) = putar(daftar.shuffled())
+
+    /**
+     * Playlist YouTube yang diputar bertahap: saat antrean tinggal 5 lagu,
+     * 100 lagu berikutnya diambil diam-diam. Daftar kosong = sudah habis.
+     */
+    private var ambilLanjutan: (suspend () -> List<Lagu>)? = null
+    private var mengambilLanjutan = false
+
+    private fun cekLanjutan(c: MediaController) {
+        val ambil = ambilLanjutan ?: return
+        if (mengambilLanjutan || c.mediaItemCount == 0 || c.currentMediaItemIndex < c.mediaItemCount - 5) return
+        mengambilLanjutan = true
+        viewModelScope.launch {
+            try {
+                val baru = ambil()
+                if (ambilLanjutan !== ambil) return@launch
+                if (baru.isEmpty()) {
+                    ambilLanjutan = null
+                } else {
+                    val cc = controller ?: return@launch
+                    val ada = antrean.map { it.kunci }.toSet()
+                    cc.addMediaItems(baru.filter { it.kunci !in ada }.map(::item))
+                }
+            } catch (e: Exception) {
+                // dicoba lagi saat lagu berikutnya
+            } finally {
+                mengambilLanjutan = false
+            }
+        }
+    }
 
     fun antre(lagu: Lagu) {
         val c = controller ?: return
@@ -351,14 +410,28 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun alihIkuti(nama: String, url: String) {
         if (url.isEmpty()) return kabar("Channel penyanyi ini tidak diketahui")
-        kabar(if (data.alihkanIkuti(nama, url)) "Mengikuti $nama" else "Berhenti mengikuti $nama")
+        val ikut = data.alihkanIkuti(nama, url, YouTube.fotoTersimpan(url) ?: "")
+        kabar(if (ikut) "Mengikuti $nama" else "Berhenti mengikuti $nama")
+        if (ikut && YouTube.fotoTersimpan(url) == null) {
+            viewModelScope.launch { runCatching { YouTube.fotoChannel(url) }.getOrNull()?.let { data.aturFotoPenyanyi(url, it) } }
+        }
     }
 
+    /** Penyanyi yang diikuti tapi belum punya foto profil: dilengkapi pelan-pelan. */
+    private suspend fun lengkapiFotoPenyanyi() {
+        for (p in data.penyanyi.value.filter { it.foto.isEmpty() }) {
+            if (YouTube.sedangDitahan) break
+            runCatching { YouTube.fotoChannel(p.url) }.getOrNull()?.let { data.aturFotoPenyanyi(p.url, it) }
+            delay(2500)
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
     fun unduh(ctx: Context, lagu: Lagu) {
         if (lagu.lokal) return kabar("Lagu ini sudah ada di HP")
-        if (data.unduhan.value.containsKey(lagu.id)) return kabar("Sudah diunduh")
-        kabar("Mengunduh “${lagu.judul}”…")
-        Unduhan.unduh(ctx, lagu) { kabar(it) }
+        if (Unduhan.sudahDiunduh(lagu.id)) return kabar("Sudah ada di Offline")
+        if (AntreanUnduh.tambah(listOf(lagu)) == 0) return kabar("Sudah ada di antrean unduhan")
+        kabar(if (AntreanUnduh.info.value.antre.size > 1) "Ditambahkan ke antrean unduhan" else "Mengunduh “${lagu.judul}”…")
     }
 
     // ------------------------------------------------------------------ cari
@@ -373,7 +446,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val t = teks.trim()
         if (t.isEmpty()) return
         val id = if (t.startsWith("http")) YouTube.idDari(t) else null
-        if (id != null) return bukaTautan(t)
+        if (id != null || (t.startsWith("http") && YouTube.adalahPlaylist(t))) return bukaTautan(t)
         kueri = t
         judulCari = judul.ifEmpty { "Hasil: $t" }
         val filter = data.pengaturan.value.filterCari
@@ -407,7 +480,11 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             return
         }
         val url = Regex("https?://\\S+").find(teks)?.value ?: return kabar("Tidak ada link di teks itu")
-        val id = YouTube.idDari(url) ?: return kabar("Link itu bukan link lagu YouTube")
+        val id = YouTube.idDari(url)
+        if (id == null) {
+            if (YouTube.adalahPlaylist(url)) return bukaPlaylistYouTube(url)
+            return kabar("Link itu bukan link lagu / playlist YouTube")
+        }
         kabar("Membuka link…")
         viewModelScope.launch {
             val lagu = try {
@@ -425,9 +502,18 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------ penyanyi
     fun bukaPenyanyi(nama: String, url: String) {
         if (url.isEmpty()) return kabar("Channel penyanyi ini tidak diketahui")
-        val h = Halaman(this) { p -> YouTube.laguChannel(url, nama, p) }
+        val h = Halaman(this) { p ->
+            YouTube.laguChannel(url, nama, p).also {
+                // foto profil ikut diketahui saat channel dibuka
+                YouTube.fotoTersimpan(url)?.let { f ->
+                    if (penyanyiDibuka?.url == url) penyanyiDibuka = penyanyiDibuka?.copy(foto = f)
+                    data.aturFotoPenyanyi(url, f)
+                }
+            }
+        }
         halamanPenyanyi = h
-        penyanyiDibuka = Penyanyi(nama, url)
+        val foto = data.penyanyi.value.firstOrNull { it.url == url }?.foto?.ifEmpty { null } ?: YouTube.fotoTersimpan(url) ?: ""
+        penyanyiDibuka = Penyanyi(nama, url, foto)
         pemutarTerbuka = false
         h.mulai()
     }
@@ -436,6 +522,204 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         penyanyiDibuka = null
         halamanPenyanyi = null
     }
+
+    /** Pindah tab bawah: halaman penyanyi / playlist yang terbuka ditutup. */
+    fun bukaTab(t: Tab) {
+        tutupPenyanyi()
+        playlistDibuka = null
+        playlistYt = null
+        tab = t
+    }
+
+    // ------------------------------------------------------------------ playlist sendiri
+    /** Playlist yang sedang dibuka (id), di dalam tab Pustaka. */
+    var playlistDibuka by mutableStateOf<String?>(null)
+        private set
+
+    /** Lagu yang sedang mau dimasukkan ke playlist (jendela "Tambah ke playlist"). */
+    var tambahKePlaylist by mutableStateOf<List<Lagu>?>(null)
+
+    /** Playlist yang sedang ditawarkan untuk diunduh (jendela "Unduh playlist"). */
+    var unduhPlaylist by mutableStateOf<String?>(null)
+
+    fun bukaPlaylist(id: String) {
+        penyanyiDibuka = null
+        halamanPenyanyi = null
+        playlistYt = null
+        playlistDibuka = id
+        subPustaka = 1
+        tab = Tab.PUSTAKA
+        pemutarTerbuka = false
+    }
+
+    fun tutupPlaylist() {
+        playlistDibuka = null
+    }
+
+    fun buatPlaylist(nama: String, lagu: List<Lagu> = emptyList()): Playlist {
+        val p = data.buatPlaylist(nama, lagu)
+        kabar("Playlist “${p.nama}” dibuat")
+        return p
+    }
+
+    /** Masukkan lagu ke playlist. Playlist offline: lagu baru langsung masuk antrean unduhan. */
+    fun masukkanKePlaylist(id: String, lagu: List<Lagu>) {
+        val p = data.playlistDengan(id) ?: return
+        val masuk = lagu.filter { data.tambahKePlaylist(id, it) }
+        when {
+            masuk.isEmpty() -> kabar(if (lagu.size == 1) "Sudah ada di ${p.nama}" else "Semua lagu sudah ada di ${p.nama}")
+            p.offline -> {
+                val n = AntreanUnduh.tambah(masuk, p.nama)
+                kabar("Ditambahkan ke ${p.nama}" + if (n > 0) " — sedang diunduh" else "")
+            }
+            else -> kabar(if (masuk.size == 1) "Ditambahkan ke ${p.nama}" else "${masuk.size} lagu ditambahkan ke ${p.nama}")
+        }
+    }
+
+    /** Keluarkan lagu dari playlist; [hapusFile] = file unduhannya ikut dihapus. */
+    fun keluarkanDariPlaylist(id: String, lagu: Lagu, hapusFile: Boolean) {
+        data.hapusDariPlaylist(id, lagu.kunci)
+        if (hapusFile && !lagu.lokal) Unduhan.hapusFile(getApplication<Application>(), lagu.id)
+    }
+
+    /** Perlu bertanya "hapus juga file unduhannya?" saat lagu dikeluarkan dari playlist ini? */
+    fun perluTanyaFile(id: String, lagu: Lagu): Boolean {
+        val p = data.playlistDengan(id) ?: return false
+        return p.offline && !lagu.lokal && Unduhan.sudahDiunduh(lagu.id) && !data.diPlaylistOffline(lagu.kunci, kecuali = id)
+    }
+
+    /** Mulai unduh playlist. [semua] = seluruh lagu -> playlist ditandai offline (lagu baru ikut diunduh). */
+    fun mulaiUnduhPlaylist(id: String, daftar: List<Lagu>, semua: Boolean) {
+        val p = data.playlistDengan(id) ?: return
+        if (semua) data.aturOfflinePlaylist(id, true)
+        val n = AntreanUnduh.tambah(daftar, p.nama)
+        kabar(if (n > 0) "Mengunduh $n lagu dari ${p.nama}" else "Semua lagu itu sudah diunduh")
+    }
+
+    /** Hapus file unduhan lagu-lagu playlist ini (kecuali yang masih dipakai playlist offline lain). Playlist tetap ada. */
+    fun hapusUnduhanPlaylist(id: String) {
+        val p = data.playlistDengan(id) ?: return
+        data.aturOfflinePlaylist(id, false)
+        var n = 0
+        p.lagu.filter { !it.lokal && Unduhan.sudahDiunduh(it.id) && !data.diPlaylistOffline(it.kunci, kecuali = id) }
+            .forEach { if (Unduhan.hapusFile(getApplication<Application>(), it.id)) n++ }
+        kabar("$n file unduhan dihapus. ${p.nama} kembali jadi playlist online.")
+    }
+
+    fun hapusPlaylist(id: String) {
+        val p = data.playlistDengan(id) ?: return
+        data.hapusPlaylist(id)
+        if (playlistDibuka == id) playlistDibuka = null
+        kabar("Playlist “${p.nama}” dihapus")
+    }
+
+    // ------------------------------------------------------------------ playlist YouTube
+    var playlistYt by mutableStateOf<HalamanPlaylistYt?>(null)
+        private set
+
+    fun bukaPlaylistYouTube(url: String) {
+        val h = HalamanPlaylistYt(url)
+        pemutarTerbuka = false
+        penyanyiDibuka = null
+        halamanPenyanyi = null
+        playlistDibuka = null
+        playlistYt = h
+        h.memuat = true
+        viewModelScope.launch {
+            try {
+                val (info, hasil) = YouTube.bukaPlaylist(url)
+                h.info = info
+                h.lagu = hasil.lagu
+                h.berikut = hasil.berikut
+                h.adaBerikut = hasil.berikut != null
+            } catch (e: DitahanYouTube) {
+                h.galat = "YouTube sedang menahan permintaan (dikira bot). Coba lagi beberapa saat lagi."
+            } catch (e: Exception) {
+                h.galat = "Playlist tidak bisa dibuka (mungkin pribadi atau sudah dihapus)."
+            } finally {
+                h.memuat = false
+            }
+        }
+    }
+
+    fun tutupPlaylistYt() {
+        playlistYt = null
+    }
+
+    fun muatLagiPlaylistYt(h: HalamanPlaylistYt) {
+        val hal = h.berikut ?: return
+        if (h.memuat) return
+        h.memuat = true
+        viewModelScope.launch {
+            try {
+                val r = YouTube.lanjutPlaylist(h.url, hal)
+                val ada = h.lagu.map { it.id }.toSet()
+                h.lagu = h.lagu + r.lagu.filter { it.id !in ada }
+                h.berikut = r.berikut
+                h.adaBerikut = r.berikut != null
+            } catch (e: Exception) {
+                kabar(if (e is DitahanYouTube) "YouTube sedang menahan permintaan. Coba lagi nanti." else "Gagal memuat lagu berikutnya")
+            } finally {
+                h.memuat = false
+            }
+        }
+    }
+
+    /** Putar bertahap: yang sudah dimuat diputar, 100 berikutnya diambil saat antrean tinggal 5 lagu. */
+    fun putarPlaylistYt(h: HalamanPlaylistYt, mulai: Int = 0, acak: Boolean = false) {
+        if (h.lagu.isEmpty()) return
+        if (acak) putarAcak(h.lagu) else putar(h.lagu, mulai)
+        var hal = h.berikut
+        if (hal != null && !acak) {
+            ambilLanjutan = {
+                val sekarang = hal
+                if (sekarang == null) {
+                    emptyList()
+                } else {
+                    val r = YouTube.lanjutPlaylist(h.url, sekarang)
+                    hal = r.berikut
+                    r.lagu
+                }
+            }
+        }
+    }
+
+    /** Ambil semua halaman (maks. 1.000 lagu, dengan jeda), lalu simpan jadi playlist sendiri. */
+    fun imporPlaylistYt(h: HalamanPlaylistYt) {
+        if (h.impor >= 0) return
+        val info = h.info ?: return
+        h.impor = h.lagu.size
+        viewModelScope.launch {
+            val semua = h.lagu.toMutableList()
+            var hal = h.berikut
+            var terputus = false
+            while (hal != null && semua.size < AppVM.BATAS_IMPOR) {
+                delay(1200)                                              // pelan-pelan, supaya tidak dikira bot
+                try {
+                    val r = YouTube.lanjutPlaylist(h.url, hal)
+                    val ada = semua.map { it.id }.toSet()
+                    semua += r.lagu.filter { it.id !in ada }
+                    hal = r.berikut
+                    h.impor = semua.size
+                } catch (e: Exception) {
+                    terputus = true
+                    break
+                }
+            }
+            val daftar = semua.take(AppVM.BATAS_IMPOR)
+            val p = data.buatPlaylist(info.nama, daftar, info.url)
+            h.impor = -1
+            kabar(
+                "Disimpan: “${p.nama}” (${daftar.size} lagu)" + when {
+                    terputus -> " — sebagian tidak terambil, coba impor lagi nanti"
+                    hal != null -> " — dibatasi $AppVM.BATAS_IMPOR lagu"
+                    else -> ""
+                },
+            )
+            bukaPlaylist(p.id)
+        }
+    }
+
 
     // ------------------------------------------------------------------ rak beranda
     val isiRak = mutableStateMapOf<String, List<Lagu>>()
@@ -470,5 +754,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             data.tambahRak(p.nama, p.nama, 10, p.url)
             kabar("Rak ${p.nama} ditambahkan ke Beranda")
         }
+    }
+
+    companion object {
+        const val BATAS_IMPOR = 1000
     }
 }
