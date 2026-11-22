@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
+import id.ruangputar.musik.inti.Potong
 import id.ruangputar.musik.inti.Unduhan
 import id.ruangputar.musik.inti.formatWaktu
 
@@ -155,9 +156,17 @@ fun PemutarPenuh(vm: AppVM) {
                     valueRange = 0f..durasi,
                     modifier = Modifier.padding(top = 12.dp),
                 )
+                val potong by Potong.rentang.collectAsState()
                 Row(Modifier.fillMaxWidth()) {
                     Text(formatWaktu(((seret ?: vm.posisi.toFloat()) / 1000).toLong()), style = MaterialTheme.typography.labelSmall)
                     Spacer(Modifier.weight(1f))
+                    potong?.let { r ->
+                        Text(
+                            "✂ ${formatWaktu(r.awalMs / 1000)} – ${r.akhirMs?.let { formatWaktu(it / 1000) } ?: "…"}",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.weight(1f))
+                    }
                     Text(formatWaktu(vm.durasi / 1000), style = MaterialTheme.typography.labelSmall)
                 }
 
@@ -198,6 +207,18 @@ fun PemutarPenuh(vm: AppVM) {
                                 else -> Icon(Ikon.Unduh, "Unduh")
                             }
                         }
+                    }
+                    // gunting: tekan 1 = awal, tekan 2 = akhir & ulang, tekan 3 (tong sampah) = hapus
+                    IconButton(onClick = { vm.alihPotong() }) {
+                        Icon(
+                            if (potong?.akhirMs != null) Ikon.TongSampah else Ikon.Gunting,
+                            when {
+                                potong == null -> "Potong & ulang: tandai awal"
+                                potong?.akhirMs == null -> "Tandai akhir potongan"
+                                else -> "Hapus potongan"
+                            },
+                            tint = if (potong != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                     TombolTimer(vm)
                 }

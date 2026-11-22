@@ -69,6 +69,27 @@ class LayananPutar : MediaSessionService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        // ---- potongan ulang (gunting): kembali ke awal saat melewati akhir
+        val penjaga = android.os.Handler(android.os.Looper.getMainLooper())
+        val periksa = object : Runnable {
+            override fun run() {
+                val r = Potong.rentang.value ?: return
+                if (pemutar.currentMediaItem?.mediaId != r.mediaId) {
+                    Potong.atur(null)
+                    return
+                }
+                val akhir = r.akhirMs
+                if (akhir != null && pemutar.currentPosition >= akhir) pemutar.seekTo(r.awalMs)
+                penjaga.postDelayed(this, 120)
+            }
+        }
+        Potong.saatBerubah = {
+            penjaga.post {
+                penjaga.removeCallbacks(periksa)
+                if (Potong.rentang.value?.akhirMs != null) penjaga.post(periksa)
+            }
+        }
+
         sesi = MediaSession.Builder(this, pemutar)
             .setCallback(PanggilanSesi())
             .setSessionActivity(buka)
@@ -98,6 +119,8 @@ class LayananPutar : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        Potong.saatBerubah = {}
+        Potong.atur(null)
         sesi?.run {
             player.release()
             release()
@@ -136,6 +159,9 @@ class LayananPutar : MediaSessionService() {
 
     private inner class PendengarPemutar(private val p: ExoPlayer) : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // lagu berganti -> potongan hilang (ulang lagu yang sama tetap dipertahankan)
+            val r = Potong.rentang.value
+            if (r != null && r.mediaId != mediaItem?.mediaId) Potong.atur(null)
             val lagu = Lagu.dariTeks(mediaItem?.mediaMetadata?.extras?.getString("lagu")) ?: return
             App.data.catatPutar(lagu)
         }

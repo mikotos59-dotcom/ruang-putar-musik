@@ -22,6 +22,8 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import id.ruangputar.musik.App
+import id.ruangputar.musik.inti.Potong
+import id.ruangputar.musik.inti.formatWaktu
 import id.ruangputar.musik.inti.DitahanYouTube
 import id.ruangputar.musik.inti.Hasil
 import id.ruangputar.musik.inti.LayananPutar
@@ -288,6 +290,35 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
                 Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
                 else -> Player.REPEAT_MODE_OFF
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ potongan ulang (gunting)
+    /** Klik 1 = tandai awal, klik 2 = tandai akhir lalu ulang dari awal, klik 3 = hapus. */
+    fun alihPotong() {
+        val c = controller ?: return
+        val id = c.currentMediaItem?.mediaId ?: return
+        val kini = c.currentPosition.coerceAtLeast(0)
+        val r = Potong.rentang.value?.takeIf { it.mediaId == id }
+        when {
+            r == null -> {
+                Potong.atur(Potong.Rentang(id, kini))
+                kabar("Awal potongan ${formatWaktu(kini / 1000)} — tekan gunting lagi di bagian akhir")
+            }
+            r.akhirMs == null -> {
+                if (kini < r.awalMs + 1000) {
+                    kabar("Akhir potongan harus setelah ${formatWaktu(r.awalMs / 1000)}")
+                    return
+                }
+                Potong.atur(r.copy(akhirMs = kini))
+                c.seekTo(r.awalMs)
+                posisi = r.awalMs
+                kabar("Mengulang ${formatWaktu(r.awalMs / 1000)} – ${formatWaktu(kini / 1000)}")
+            }
+            else -> {
+                Potong.atur(null)
+                kabar("Potongan dihapus")
             }
         }
     }
